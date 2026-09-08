@@ -1,61 +1,85 @@
-import type { Encargo } from '../types/encargo'
-import { obtenerPago } from '../types/encargo'
+import { supabase } from './supabase'
 
-const compactarFecha = (fechaISO: string) => fechaISO.replaceAll('-', '')
-const compactarHora = (hora: string) => hora.replace(':', '').slice(0, 4)
-
-const sumarUnaHora = (fechaISO: string, hora: string) => {
-  const [anio, mes, dia] = fechaISO.split('-').map(Number)
-  const [horas, minutos] = hora.split(':').map(Number)
-  const fecha = new Date(anio, mes - 1, dia, horas, minutos, 0)
-
-  fecha.setHours(fecha.getHours() + 1)
-
-  const finFecha = `${fecha.getFullYear()}${String(fecha.getMonth() + 1).padStart(2, '0')}${String(fecha.getDate()).padStart(2, '0')}`
-  const finHora = `${String(fecha.getHours()).padStart(2, '0')}${String(fecha.getMinutes()).padStart(2, '0')}00`
-
-  return `${finFecha}T${finHora}`
+export type EstadoGoogleCalendar = {
+  connected: boolean
+  canManage: boolean
+  ownerName: string | null
+  connectedAt: string | null
 }
 
-export const crearUrlGoogleCalendar = (
-  pedido: Pick<
-    Encargo,
-    | 'nombre_cliente'
-    | 'fecha_entrega'
-    | 'hora_entrega'
-    | 'sabor_torta'
-    | 'sabor_relleno'
-    | 'chantilly'
-    | 'dedicatoria'
-    | 'observaciones'
-    | 'precio_cotizado'
-    | 'abono'
-  >
-) => {
-  const inicio = `${compactarFecha(pedido.fecha_entrega)}T${compactarHora(pedido.hora_entrega)}00`
-  const fin = sumarUnaHora(pedido.fecha_entrega, pedido.hora_entrega)
-  const pago = obtenerPago(pedido)
+export type ResultadoSincronizacion = {
+  synced: boolean
+  reason?: 'not_connected' | string
+  deleted?: boolean
+  eventId?: string | null
+  eventUrl?: string | null
+  syncedAt?: string | null
+  total?: number
+  correctos?: number
+  errores?: number
+}
 
-  const detalles = [
-    `Cliente: ${pedido.nombre_cliente}`,
-    `Torta: ${pedido.sabor_torta}`,
-    `Relleno: ${pedido.sabor_relleno}`,
-    `Chantilly: ${pedido.chantilly}`,
-    pedido.dedicatoria ? `Dedicatoria: ${pedido.dedicatoria}` : '',
-    pedido.observaciones ? `Observaciones: ${pedido.observaciones}` : '',
-    `Pago: ${pago.estado}`,
-    `Saldo: $${pago.saldo.toFixed(2)}`,
-  ]
-    .filter(Boolean)
-    .join('\n')
-
-  const params = new URLSearchParams({
-    action: 'TEMPLATE',
-    text: `Sweet Cakes - ${pedido.nombre_cliente}`,
-    dates: `${inicio}/${fin}`,
-    details: detalles,
-    ctz: 'America/El_Salvador',
+const invocarGoogleCalendar = async <T>(body: Record<string, unknown>) => {
+  const { data, error } = await supabase.functions.invoke('google-calendar', {
+    body,
   })
 
-  return `https://calendar.google.com/calendar/render?${params.toString()}`
+  if (error) {
+    throw error
+  }
+
+  if (data?.error) {
+    throw new Error(data.error)
+  }
+
+  return data as T
+}
+
+export const obtenerEstadoGoogleCalendar = () =>
+  invocarGoogleCalendar<EstadoGoogleCalendar>({ action: 'status' })
+
+export const conectarGoogleCalendar = async () => {
+  const returnUrl = `${window.location.origin}${window.location.pathname}`
+  const data = await invocarGoogleCalendar<{ url: string; redirectUri: string }>({
+    action: 'connect',
+    returnUrl,
+  })
+
+  window.location.assign(data.url)
+}
+
+export const desconectarGoogleCalendar = () =>
+  invocarGoogleCalendar<{ disconnected: boolean }>({ action: 'disconnect' })
+
+export const sincronizarPedidoGoogleCalendar = (pedidoId: string | number) =>
+  invocarGoogleCalendar<ResultadoSincronizacion>({
+    action: 'sync-order',
+    pedidoId,
+  })
+
+export const sincronizarTodosGoogleCalendar = () =>
+  invocarGoogleCalendar<ResultadoSincronizacion>({ action: 'sync-all' })
+
+export const leerResultadoOAuthGoogleCalendar = () => {
+  const url = new URL(window.location.href)
+  const estado = url.searchParams.get('google_calendar')
+
+  if (!estado) {
+    return null
+  }
+
+  const resultado = {
+    estado,
+    mensaje: url.searchParams.get('google_message'),
+    sincronizados: Number(url.searchParams.get('google_synced') ?? 0),
+    errores: Number(url.searchParams.get('google_errors') ?? 0),
+  }
+
+  url.searchParams.delete('google_calendar')
+  url.searchParams.delete('google_message')
+  url.searchParams.delete('google_synced')
+  url.searchParams.delete('google_errors')
+  window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`)
+
+  return resultado
 }

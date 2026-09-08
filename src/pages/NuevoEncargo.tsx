@@ -3,6 +3,7 @@ import type { ReactNode } from 'react'
 import { CalendarDays, Clock3, ImagePlus, Phone, UploadCloud, User, X } from 'lucide-react'
 
 import { supabase } from '../lib/supabase'
+import { sincronizarPedidoGoogleCalendar } from '../lib/googleCalendar'
 import { eliminarImagenReferencia, subirImagenReferencia, validarImagen } from '../lib/imagenes'
 import { fechaLocalAISO } from '../types/encargo'
 
@@ -92,8 +93,24 @@ function NuevoEncargo({ onGuardado }: NuevoEncargoProps) {
 
       if (error) throw error
 
+      let mensajeGoogle = ''
+
+      if (data?.id !== undefined) {
+        try {
+          const resultadoGoogle = await sincronizarPedidoGoogleCalendar(data.id)
+          if (resultadoGoogle.synced) {
+            mensajeGoogle = ' También se sincronizó con Google Calendar.'
+          } else if (resultadoGoogle.reason === 'not_connected') {
+            mensajeGoogle = ' Google Calendar todavía no está conectado.'
+          }
+        } catch (errorGoogle) {
+          console.error('El pedido se guardó, pero Google Calendar no pudo sincronizarlo:', errorGoogle)
+          mensajeGoogle = ' El pedido quedó guardado, pero Google Calendar necesita reintentar la sincronización.'
+        }
+      }
+
       limpiar()
-      setMensaje('✓ Encargo guardado correctamente.')
+      setMensaje(`✓ Encargo guardado correctamente.${mensajeGoogle}`)
       if (data?.id !== undefined) onGuardado?.(data.id)
     } catch (error) {
       if (rutaImagen) await eliminarImagenReferencia(rutaImagen)

@@ -1,6 +1,23 @@
 import { useEffect, useMemo, useState } from 'react'
-import { CalendarDays, ChevronLeft, ChevronRight, ExternalLink } from 'lucide-react'
+import {
+  CalendarCheck2,
+  CalendarDays,
+  ChevronLeft,
+  ChevronRight,
+  ExternalLink,
+  Link2,
+  RefreshCw,
+  Unplug,
+} from 'lucide-react'
 
+import {
+  conectarGoogleCalendar,
+  desconectarGoogleCalendar,
+  leerResultadoOAuthGoogleCalendar,
+  obtenerEstadoGoogleCalendar,
+  sincronizarTodosGoogleCalendar,
+  type EstadoGoogleCalendar,
+} from '../lib/googleCalendar'
 import { supabase } from '../lib/supabase'
 import type { Encargo } from '../types/encargo'
 import { fechaLocalAISO, formatearHora } from '../types/encargo'
@@ -35,6 +52,10 @@ function Calendario({ onSeleccionarDia, onVerDetalle }: CalendarioProps) {
   const [pedidos, setPedidos] = useState<Encargo[]>([])
   const [cargando, setCargando] = useState(true)
   const [error, setError] = useState('')
+  const [estadoGoogle, setEstadoGoogle] = useState<EstadoGoogleCalendar | null>(null)
+  const [cargandoGoogle, setCargandoGoogle] = useState(true)
+  const [accionGoogle, setAccionGoogle] = useState(false)
+  const [mensajeGoogle, setMensajeGoogle] = useState('')
 
   const rango = useMemo(() => {
     const primerDiaMes = new Date(mesVisible.getFullYear(), mesVisible.getMonth(), 1)
@@ -43,30 +64,73 @@ function Calendario({ onSeleccionarDia, onVerDetalle }: CalendarioProps) {
     const fin = finSemanaDomingo(ultimoDiaMes)
     const dias: Date[] = []
     const cursor = new Date(inicio)
+
     while (cursor <= fin) {
       dias.push(new Date(cursor))
       cursor.setDate(cursor.getDate() + 1)
     }
+
     return { inicio, fin, dias }
   }, [mesVisible])
 
+  const cargarEstadoGoogle = async () => {
+    setCargandoGoogle(true)
+
+    try {
+      const estado = await obtenerEstadoGoogleCalendar()
+      setEstadoGoogle(estado)
+    } catch (errorGoogle) {
+      console.error(errorGoogle)
+      setMensajeGoogle(errorGoogle instanceof Error ? errorGoogle.message : 'No se pudo revisar Google Calendar.')
+    } finally {
+      setCargandoGoogle(false)
+    }
+  }
+
+  useEffect(() => {
+    const resultado = leerResultadoOAuthGoogleCalendar()
+
+    if (resultado?.estado === 'connected') {
+      const detalle = resultado.errores > 0
+        ? `Google Calendar quedó conectado. ${resultado.sincronizados} pedidos sincronizados y ${resultado.errores} con error.`
+        : `✓ Google Calendar conectado. ${resultado.sincronizados} pedidos sincronizados automáticamente.`
+      setMensajeGoogle(detalle)
+    } else if (resultado?.estado === 'error') {
+      setMensajeGoogle(resultado.mensaje || 'No se pudo conectar Google Calendar.')
+    }
+
+    cargarEstadoGoogle()
+  }, [])
+
   useEffect(() => {
     let activo = true
+
     const cargar = async () => {
-      setCargando(true); setError('')
+      setCargando(true)
+      setError('')
+
       const { data, error: errorSupabase } = await supabase
         .from('encargos')
-        .select('id,nombre_cliente,telefono,fecha_entrega,hora_entrega,sabor_torta,sabor_relleno,chantilly,imagen_referencia,dedicatoria,observaciones,precio_cotizado,abono,estado_pedido,created_at')
+        .select('id,nombre_cliente,telefono,fecha_entrega,hora_entrega,sabor_torta,sabor_relleno,chantilly,imagen_referencia,dedicatoria,observaciones,precio_cotizado,abono,estado_pedido,created_at,google_event_id,google_event_url,google_calendar_synced_at,google_calendar_sync_error')
         .gte('fecha_entrega', fechaLocalAISO(rango.inicio))
         .lte('fecha_entrega', fechaLocalAISO(rango.fin))
         .neq('estado_pedido', 'Cancelado')
         .order('fecha_entrega', { ascending: true })
         .order('hora_entrega', { ascending: true })
+
       if (!activo) return
-      if (errorSupabase) { console.error(errorSupabase); setError('No se pudo cargar el calendario.'); setPedidos([]) }
-      else setPedidos((data ?? []) as Encargo[])
+
+      if (errorSupabase) {
+        console.error(errorSupabase)
+        setError('No se pudo cargar el calendario.')
+        setPedidos([])
+      } else {
+        setPedidos((data ?? []) as Encargo[])
+      }
+
       setCargando(false)
     }
+
     cargar()
     return () => { activo = false }
   }, [rango.inicio, rango.fin])
@@ -81,12 +145,58 @@ function Calendario({ onSeleccionarDia, onVerDetalle }: CalendarioProps) {
   const tituloMes = mesVisible.toLocaleDateString('es-SV', { month: 'long', year: 'numeric' })
   const moverMes = (cantidad: number) => setMesVisible((actual) => new Date(actual.getFullYear(), actual.getMonth() + cantidad, 1))
 
+  const conectar = async () => {
+    setAccionGoogle(true)
+    setMensajeGoogle('')
+
+    try {
+      await conectarGoogleCalendar()
+    } catch (errorGoogle) {
+      setAccionGoogle(false)
+      setMensajeGoogle(errorGoogle instanceof Error ? errorGoogle.message : 'No se pudo iniciar la conexión con Google.')
+    }
+  }
+
+  const sincronizarTodo = async () => {
+    setAccionGoogle(true)
+    setMensajeGoogle('')
+
+    try {
+      const resultado = await sincronizarTodosGoogleCalendar()
+      if (!resultado.synced && resultado.reason === 'not_connected') {
+        setMensajeGoogle('Primero conecta Google Calendar.')
+      } else {
+        setMensajeGoogle(`✓ Sincronización terminada: ${resultado.correctos ?? 0} correctos${(resultado.errores ?? 0) > 0 ? `, ${resultado.errores} con error` : ''}.`)
+      }
+      await cargarEstadoGoogle()
+    } catch (errorGoogle) {
+      setMensajeGoogle(errorGoogle instanceof Error ? errorGoogle.message : 'No se pudo sincronizar Google Calendar.')
+    } finally {
+      setAccionGoogle(false)
+    }
+  }
+
+  const desconectar = async () => {
+    setAccionGoogle(true)
+    setMensajeGoogle('')
+
+    try {
+      await desconectarGoogleCalendar()
+      setMensajeGoogle('Google Calendar fue desconectado. Los eventos ya creados permanecen en Google hasta que los elimines allí.')
+      await cargarEstadoGoogle()
+    } catch (errorGoogle) {
+      setMensajeGoogle(errorGoogle instanceof Error ? errorGoogle.message : 'No se pudo desconectar Google Calendar.')
+    } finally {
+      setAccionGoogle(false)
+    }
+  }
+
   return (
     <main className="p-4 md:ml-64 md:p-8 lg:p-10">
       <header className="mb-7 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
         <div>
           <p className="text-sm text-[#756870]">Agenda mensual</p>
-          <h2 className="mt-1 text-3xl font-bold text-[#5C3A4D] capitalize">{tituloMes}</h2>
+          <h2 className="mt-1 text-3xl font-bold capitalize text-[#5C3A4D]">{tituloMes}</h2>
           <p className="mt-2 text-sm text-[#756870]">Vista completa del mes con clientes, horas y estado de cada encargo.</p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -96,6 +206,42 @@ function Calendario({ onSeleccionarDia, onVerDetalle }: CalendarioProps) {
           <button type="button" onClick={() => moverMes(1)} className="rounded-xl border border-[#E5D7DE] bg-white p-2.5"><ChevronRight size={18}/></button>
         </div>
       </header>
+
+      <section className="mb-6 overflow-hidden rounded-2xl border border-[#DCE6F7] bg-white shadow-sm">
+        <div className="flex flex-col gap-4 p-5 lg:flex-row lg:items-center lg:justify-between">
+          <div className="flex items-start gap-4">
+            <div className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl ${estadoGoogle?.connected ? 'bg-[#EEF5FF] text-[#4285F4]' : 'bg-[#F5F1F3] text-[#9A8B93]'}`}>
+              {estadoGoogle?.connected ? <CalendarCheck2 size={24}/> : <Link2 size={24}/>} 
+            </div>
+            <div>
+              <p className="font-bold text-[#5C3A4D]">Sincronización con Google Calendar</p>
+              <p className="mt-1 text-sm text-[#756870]">
+                {cargandoGoogle
+                  ? 'Revisando conexión...'
+                  : estadoGoogle?.connected
+                    ? `Conectado${estadoGoogle.ownerName ? ` por ${estadoGoogle.ownerName}` : ''}. Los pedidos nuevos se crean automáticamente en el calendario.`
+                    : 'Todavía no hay una cuenta de Google conectada al negocio.'}
+              </p>
+              {estadoGoogle?.connectedAt && <p className="mt-1 text-xs text-[#9A8B93]">Conexión actualizada: {new Date(estadoGoogle.connectedAt).toLocaleString('es-SV')}</p>}
+            </div>
+          </div>
+
+          {estadoGoogle?.canManage && (
+            <div className="flex flex-wrap gap-2">
+              {!estadoGoogle.connected ? (
+                <button type="button" disabled={accionGoogle} onClick={conectar} className="inline-flex items-center gap-2 rounded-xl bg-[#4285F4] px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-60"><Link2 size={17}/> Conectar Google</button>
+              ) : (
+                <>
+                  <button type="button" disabled={accionGoogle} onClick={sincronizarTodo} className="inline-flex items-center gap-2 rounded-xl bg-[#4285F4] px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-60"><RefreshCw size={17} className={accionGoogle ? 'animate-spin' : ''}/> Sincronizar todo</button>
+                  <button type="button" disabled={accionGoogle} onClick={desconectar} className="inline-flex items-center gap-2 rounded-xl border border-[#E5D7DE] bg-white px-4 py-2.5 text-sm font-semibold text-[#756870] disabled:opacity-60"><Unplug size={17}/> Desconectar</button>
+                </>
+              )}
+            </div>
+          )}
+        </div>
+
+        {mensajeGoogle && <div className="border-t border-[#E8EEF9] bg-[#F7FAFF] px-5 py-3 text-sm font-medium text-[#3569B8]">{mensajeGoogle}</div>}
+      </section>
 
       {error && <div className="mb-5 rounded-xl bg-[#FFF0F5] px-4 py-3 text-sm font-semibold text-[#D93470]">{error}</div>}
 
@@ -112,6 +258,7 @@ function Calendario({ onSeleccionarDia, onVerDetalle }: CalendarioProps) {
             const esHoy = fechaISO === hoyISO
             const pendientes = pedidosDia.filter((p) => p.estado_pedido === 'Pendiente').length
             const listos = pedidosDia.filter((p) => p.estado_pedido === 'Listo').length
+
             return (
               <div
                 key={fechaISO}
@@ -126,6 +273,7 @@ function Calendario({ onSeleccionarDia, onVerDetalle }: CalendarioProps) {
                   {pedidosDia.slice(0, 3).map((pedido) => (
                     <button key={pedido.id} type="button" onClick={() => onVerDetalle(pedido.id)} className={`block w-full truncate rounded-md px-1.5 py-1 text-left text-[9px] font-semibold sm:text-[10px] lg:text-xs ${pedido.estado_pedido === 'Pendiente' ? 'bg-[#FFF0F5] text-[#C93268]' : pedido.estado_pedido === 'Listo' ? 'bg-[#F4EEF3] text-[#6F4C69]' : 'bg-[#EEF3EB] text-[#64745D]'}`} title={`${formatearHora(pedido.hora_entrega)} - ${pedido.nombre_cliente}`}>
                       <span className="hidden lg:inline">{formatearHora(pedido.hora_entrega)} · </span>{pedido.nombre_cliente}
+                      {pedido.google_event_id && <span className="ml-1 text-[#4285F4]">●</span>}
                     </button>
                   ))}
                   {pedidosDia.length > 3 && <button type="button" onClick={() => onSeleccionarDia(fechaISO)} className="w-full text-left text-[9px] font-bold text-[#EC3D7F] sm:text-[10px]">+{pedidosDia.length - 3} más</button>}
@@ -138,7 +286,7 @@ function Calendario({ onSeleccionarDia, onVerDetalle }: CalendarioProps) {
         </div>
       </section>
 
-      <div className="mt-4 flex flex-wrap items-center gap-4 text-xs text-[#756870]"><span className="flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-full bg-[#F6B4CC]"/> Pendiente</span><span className="flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-full bg-[#CBB5C6]"/> Listo</span><span className="flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-full bg-[#C9D6C4]"/> Entregado</span>{cargando && <span className="ml-auto flex items-center gap-1"><CalendarDays size={14}/> Cargando...</span>}</div>
+      <div className="mt-4 flex flex-wrap items-center gap-4 text-xs text-[#756870]"><span className="flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-full bg-[#F6B4CC]"/> Pendiente</span><span className="flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-full bg-[#CBB5C6]"/> Listo</span><span className="flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-full bg-[#C9D6C4]"/> Entregado</span><span className="flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-full bg-[#4285F4]"/> Sincronizado con Google</span>{cargando && <span className="ml-auto flex items-center gap-1"><CalendarDays size={14}/> Cargando...</span>}</div>
     </main>
   )
 }

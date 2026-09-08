@@ -17,6 +17,10 @@ export type Encargo = {
   estado_pedido: EstadoPedido | string
   creado_por?: string | null
   created_at?: string | null
+  google_event_id?: string | null
+  google_event_url?: string | null
+  google_calendar_synced_at?: string | null
+  google_calendar_sync_error?: string | null
 }
 
 export const obtenerPago = (pedido: Pick<Encargo, 'precio_cotizado' | 'abono'>) => {
