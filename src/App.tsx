@@ -103,9 +103,21 @@ function App() {
 
   if (!sesion) return <Login />
 
-  const paginaSidebar = ['detalle', 'pedidos-dia'].includes(paginaActual)
-    ? paginaAnterior === 'calendario' ? 'calendario' : 'pedidos'
-    : paginaActual
+  const paginaSidebar = paginaActual === 'pedidos-dia'
+    ? paginaAnterior === 'calendario'
+      ? 'calendario'
+      : paginaAnterior === 'inicio'
+        ? 'inicio'
+        : 'pedidos'
+    : paginaActual === 'detalle'
+      ? paginaAnterior === 'calendario'
+        ? 'calendario'
+        : paginaAnterior === 'inicio'
+          ? 'inicio'
+          : paginaAnterior === 'nuevo'
+            ? 'nuevo'
+            : 'pedidos'
+      : paginaActual
 
   return (
     <div className="min-h-screen bg-[#FFF9F7] text-[#5C3A4D]">

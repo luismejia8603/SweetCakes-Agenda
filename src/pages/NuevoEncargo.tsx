@@ -3,7 +3,6 @@ import type { ReactNode } from 'react'
 import { CalendarDays, Clock3, ImagePlus, Phone, UploadCloud, User, X } from 'lucide-react'
 
 import { supabase } from '../lib/supabase'
-import { sincronizarPedidoGoogleCalendar } from '../lib/googleCalendar'
 import { eliminarImagenReferencia, subirImagenReferencia, validarImagen } from '../lib/imagenes'
 import { fechaLocalAISO } from '../types/encargo'
 
@@ -93,24 +92,8 @@ function NuevoEncargo({ onGuardado }: NuevoEncargoProps) {
 
       if (error) throw error
 
-      let mensajeGoogle = ''
-
-      if (data?.id !== undefined) {
-        try {
-          const resultadoGoogle = await sincronizarPedidoGoogleCalendar(data.id)
-          if (resultadoGoogle.synced) {
-            mensajeGoogle = ' También se sincronizó con Google Calendar.'
-          } else if (resultadoGoogle.reason === 'not_connected') {
-            mensajeGoogle = ' Google Calendar todavía no está conectado.'
-          }
-        } catch (errorGoogle) {
-          console.error('El pedido se guardó, pero Google Calendar no pudo sincronizarlo:', errorGoogle)
-          mensajeGoogle = ' El pedido quedó guardado, pero Google Calendar necesita reintentar la sincronización.'
-        }
-      }
-
       limpiar()
-      setMensaje(`✓ Encargo guardado correctamente.${mensajeGoogle}`)
+      setMensaje('✓ Encargo guardado correctamente.')
       if (data?.id !== undefined) onGuardado?.(data.id)
     } catch (error) {
       if (rutaImagen) await eliminarImagenReferencia(rutaImagen)
@@ -122,15 +105,15 @@ function NuevoEncargo({ onGuardado }: NuevoEncargoProps) {
   }
 
   return (
-    <main className="p-5 md:ml-64 md:p-8 lg:p-10">
-      <header className="mb-8">
-        <p className="text-sm text-[#756870]">Pedidos</p>
-        <h2 className="mt-1 text-3xl font-bold text-[#5C3A4D]">Nuevo encargo</h2>
+    <main className="px-4 py-5 pb-28 sm:px-5 md:ml-20 md:p-6 lg:ml-64 lg:p-8 xl:p-10">
+      <header className="mb-6 sm:mb-8">
+        <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#B07A91] sm:text-sm sm:normal-case sm:tracking-normal sm:text-[#756870]">Pedidos</p>
+        <h2 className="mt-1 text-2xl font-bold text-[#5C3A4D] sm:text-3xl">Nuevo encargo</h2>
         <p className="mt-2 text-sm text-[#756870]">Registra el pedido completo, incluida una imagen de referencia si el cliente la envió.</p>
       </header>
 
       <form onSubmit={(e) => e.preventDefault()} className="space-y-6">
-        <section className="rounded-2xl border border-[#EEDDE3] bg-white p-5 sm:p-6">
+        <section className="rounded-2xl border border-[#EEDDE3] bg-white p-4 sm:p-6">
           <h3 className="text-lg font-semibold text-[#5C3A4D]">Cliente y entrega</h3>
           <div className="mt-5 grid gap-5 md:grid-cols-2">
             <CampoIcono icono={<User size={18} />} etiqueta="Nombre del cliente">
@@ -148,7 +131,7 @@ function NuevoEncargo({ onGuardado }: NuevoEncargoProps) {
           </div>
         </section>
 
-        <section className="rounded-2xl border border-[#EEDDE3] bg-white p-5 sm:p-6">
+        <section className="rounded-2xl border border-[#EEDDE3] bg-white p-4 sm:p-6">
           <h3 className="text-lg font-semibold text-[#5C3A4D]">Torta</h3>
           <div className="mt-5 grid gap-5 lg:grid-cols-3">
             <Selector etiqueta="Sabor de torta" value={saborTorta} onChange={setSaborTorta} opciones={['Vainilla','Marmoleado','Medianoche','Chocolate']} />
@@ -157,7 +140,7 @@ function NuevoEncargo({ onGuardado }: NuevoEncargoProps) {
           </div>
         </section>
 
-        <section className="rounded-2xl border border-[#EEDDE3] bg-white p-5 sm:p-6">
+        <section className="rounded-2xl border border-[#EEDDE3] bg-white p-4 sm:p-6">
           <div className="flex items-center gap-3">
             <div className="rounded-xl bg-[#F6E6EB] p-2 text-[#EC3D7F]"><ImagePlus size={20} /></div>
             <div><h3 className="text-lg font-semibold text-[#5C3A4D]">Detalles e imagen</h3><p className="text-sm text-[#756870]">JPG, PNG o WEBP. Máximo 6 MB.</p></div>
@@ -190,9 +173,9 @@ function NuevoEncargo({ onGuardado }: NuevoEncargoProps) {
           </div>
         </section>
 
-        <section className="rounded-2xl border border-[#EEDDE3] bg-white p-5 sm:p-6">
+        <section className="rounded-2xl border border-[#EEDDE3] bg-white p-4 sm:p-6">
           <h3 className="text-lg font-semibold text-[#5C3A4D]">Pago y estado</h3>
-          <div className="mt-5 grid gap-5 md:grid-cols-4">
+          <div className="mt-5 grid gap-5 sm:grid-cols-2 xl:grid-cols-4">
             <label><span className="mb-2 block text-sm font-medium">Precio cotizado</span><input type="number" min="0" step="0.01" value={precioCotizado} onChange={(e) => setPrecioCotizado(e.target.value)} className="input-sc pl-4" placeholder="0.00" /></label>
             <label><span className="mb-2 block text-sm font-medium">Abono</span><input type="number" min="0" max={precio || undefined} step="0.01" value={abono} onChange={(e) => setAbono(e.target.value)} className="input-sc pl-4" placeholder="0.00" /></label>
             <div><span className="mb-2 block text-sm font-medium">Saldo pendiente</span><div className="rounded-xl border border-[#DCE4D8] bg-[#F8FAF6] px-4 py-3 font-bold text-[#64745D]">${saldo.toFixed(2)}</div></div>
@@ -202,14 +185,14 @@ function NuevoEncargo({ onGuardado }: NuevoEncargoProps) {
 
         {mensaje && <div className={`rounded-xl px-4 py-3 text-sm font-semibold ${mensaje.startsWith('✓') ? 'bg-[#EEF3EB] text-[#557260]' : 'bg-[#FFF0F5] text-[#D93470]'}`}>{mensaje}</div>}
 
-        <div className="flex justify-end pb-6">
-          <button type="button" onClick={guardarEncargo} disabled={guardando} className="rounded-xl bg-[#EC3D7F] px-7 py-3.5 font-semibold text-white shadow-sm hover:bg-[#D93470] disabled:opacity-60">
+        <div className="sticky bottom-[84px] z-30 -mx-4 flex justify-end border-t border-[#EEDDE3] bg-[#FFF9F7]/95 px-4 py-3 backdrop-blur md:static md:mx-0 md:border-0 md:bg-transparent md:px-0 md:py-0 md:pb-6">
+          <button type="button" onClick={guardarEncargo} disabled={guardando} className="min-h-12 w-full rounded-xl bg-[#EC3D7F] px-7 py-3.5 font-semibold text-white shadow-[0_10px_24px_rgba(236,61,127,0.2)] hover:bg-[#D93470] disabled:opacity-60 md:w-auto">
             {guardando ? 'Guardando pedido e imagen...' : 'Guardar encargo'}
           </button>
         </div>
       </form>
 
-      <style>{`.input-sc{width:100%;border:1px solid #E5D7DE;background:#FFFDFC;border-radius:.75rem;padding:.75rem 1rem .75rem 2.5rem;color:#5C3A4D;outline:none;transition:.15s}.input-sc:focus{border-color:#EC3D7F;box-shadow:0 0 0 3px rgba(236,61,127,.08)}`}</style>
+      <style>{`.input-sc{width:100%;border:1px solid #E5D7DE;background:#FFFDFC;border-radius:.75rem;min-height:48px;padding:.75rem 1rem .75rem 2.5rem;color:#5C3A4D;outline:none;transition:.15s}.input-sc:focus{border-color:#EC3D7F;box-shadow:0 0 0 3px rgba(236,61,127,.08)}`}</style>
     </main>
   )
 }
@@ -219,7 +202,7 @@ function CampoIcono({ icono, etiqueta, children }: { icono: ReactNode; etiqueta:
 }
 
 function Selector({ etiqueta, value, onChange, opciones }: { etiqueta: string; value: string; onChange: (valor: string) => void; opciones: string[] }) {
-  return <label className="block"><span className="mb-2 block text-sm font-medium text-[#5C3A4D]">{etiqueta}</span><select value={value} onChange={(e) => onChange(e.target.value)} className="w-full rounded-xl border border-[#E5D7DE] bg-[#FFFDFC] px-4 py-3 text-[#5C3A4D] outline-none focus:border-[#EC3D7F]"><option value="">Seleccionar</option>{opciones.map((opcion) => <option key={opcion} value={opcion}>{opcion}</option>)}</select></label>
+  return <label className="block"><span className="mb-2 block text-sm font-medium text-[#5C3A4D]">{etiqueta}</span><select value={value} onChange={(e) => onChange(e.target.value)} className="min-h-12 w-full rounded-xl border border-[#E5D7DE] bg-[#FFFDFC] px-4 py-3 text-base text-[#5C3A4D] outline-none focus:border-[#EC3D7F] sm:text-sm"><option value="">Seleccionar</option>{opciones.map((opcion) => <option key={opcion} value={opcion}>{opcion}</option>)}</select></label>
 }
 
 export default NuevoEncargo

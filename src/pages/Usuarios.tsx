@@ -53,8 +53,8 @@ function Usuarios() {
   }
 
   return (
-    <main className="p-5 md:ml-64 md:p-8 lg:p-10">
-      <header className="mb-8"><p className="text-sm text-[#756870]">Administración</p><h2 className="mt-1 text-3xl font-bold text-[#5C3A4D]">Usuarios del equipo</h2><p className="mt-2 text-sm text-[#756870]">Solo el propietario puede crear cuentas nuevas de empleados y encargados.</p></header>
+    <main className="px-4 py-5 pb-28 sm:px-5 md:ml-20 md:p-6 lg:ml-64 lg:p-8 xl:p-10">
+      <header className="mb-6 sm:mb-8"><p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#B07A91] sm:text-sm sm:normal-case sm:tracking-normal sm:text-[#756870]">Administración</p><h2 className="mt-1 text-2xl font-bold text-[#5C3A4D] sm:text-3xl">Usuarios del equipo</h2><p className="mt-2 text-sm text-[#756870]">Solo el propietario puede crear cuentas nuevas de empleados y encargados.</p></header>
 
       <div className="grid gap-6 xl:grid-cols-[0.9fr_1.1fr]">
         <section className="rounded-2xl border border-[#EEDDE3] bg-white p-5 sm:p-6">
@@ -77,7 +77,7 @@ function Usuarios() {
           </div>
         </section>
       </div>
-      <style>{`.campo{width:100%;border:1px solid #E5D7DE;background:#FFFDFC;border-radius:.75rem;padding:.75rem 1rem;color:#5C3A4D;outline:none}.campo:focus{border-color:#EC3D7F;box-shadow:0 0 0 3px rgba(236,61,127,.08)}`}</style>
+      <style>{`.campo{width:100%;min-height:48px;border:1px solid #E5D7DE;background:#FFFDFC;border-radius:.75rem;padding:.75rem 1rem;color:#5C3A4D;font-size:16px;outline:none}.campo:focus{border-color:#EC3D7F;box-shadow:0 0 0 3px rgba(236,61,127,.08)}`}</style>
     </main>
   )
 }
