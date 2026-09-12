@@ -143,7 +143,7 @@ function NuevoEncargo({ onGuardado }: NuevoEncargoProps) {
         <section className="rounded-2xl border border-[#EEDDE3] bg-white p-4 sm:p-6">
           <div className="flex items-center gap-3">
             <div className="rounded-xl bg-[#F6E6EB] p-2 text-[#EC3D7F]"><ImagePlus size={20} /></div>
-            <div><h3 className="text-lg font-semibold text-[#5C3A4D]">Detalles e imagen</h3><p className="text-sm text-[#756870]">JPG, PNG o WEBP. Máximo 6 MB.</p></div>
+            <div><h3 className="text-lg font-semibold text-[#5C3A4D]">Detalles e imagen</h3><p className="text-sm text-[#756870]">JPG, PNG o WEBP. Sweet Cakes la optimiza automáticamente antes de subirla.</p></div>
           </div>
 
           <div className="mt-5 grid gap-5 lg:grid-cols-[0.9fr_1.1fr]">
@@ -156,7 +156,7 @@ function NuevoEncargo({ onGuardado }: NuevoEncargoProps) {
                     <div>
                       <ImagePlus size={36} className="mx-auto text-[#C98AA4]" />
                       <p className="mt-3 font-semibold text-[#5C3A4D]">Imagen de referencia</p>
-                      <p className="mt-1 text-xs leading-5 text-[#9A8B93]">Elige una imagen de la galería o toma una foto nueva.</p>
+                      <p className="mt-1 text-xs leading-5 text-[#9A8B93]">Elige una imagen de la galería o toma una foto nueva. Se reduce a un máximo de 1600 px y se comprime para ahorrar espacio.</p>
                     </div>
                   )}
                 </div>
@@ -208,7 +208,7 @@ function NuevoEncargo({ onGuardado }: NuevoEncargoProps) {
                   </label>
                 </div>
 
-                <p className="mt-3 text-center text-[11px] leading-4 text-[#9A8B93]">El navegador o el teléfono solicitará acceso cuando sea necesario. Sweet Cakes no puede leer tu galería completa.</p>
+                <p className="mt-3 text-center text-[11px] leading-4 text-[#9A8B93]">El navegador o el teléfono solicitará acceso cuando sea necesario. Se aceptan originales de hasta 20 MB y la versión guardada se comprime automáticamente.</p>
               </div>
 
               {imagenReferencia && (

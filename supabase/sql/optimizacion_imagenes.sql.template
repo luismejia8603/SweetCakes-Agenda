@@ -1,0 +1,133 @@
+-- ============================================================
+-- SWEET CAKES - OPTIMIZACION Y LIMPIEZA DE IMAGENES
+-- Plantilla: el instalador reemplaza __SUPABASE_URL__ y
+-- __CRON_SECRET__ antes de copiarla al portapapeles.
+-- ============================================================
+
+-- 1) Bucket privado y límite de 2 MB para nuevas subidas.
+-- El frontend comprime primero, por lo que el archivo guardado
+-- normalmente será mucho menor que este límite.
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values (
+  'encargos-imagenes',
+  'encargos-imagenes',
+  false,
+  2097152,
+  array['image/jpeg', 'image/png', 'image/webp']
+)
+on conflict (id) do update set
+  public = false,
+  file_size_limit = excluded.file_size_limit,
+  allowed_mime_types = excluded.allowed_mime_types;
+
+-- 2) Política de borrado para el frontend.
+-- Quien subió un archivo puede retirar su propio objeto si el
+-- guardado del pedido falla. El Propietario conserva acceso total.
+drop policy if exists sweetcakes_imagenes_borrar on storage.objects;
+create policy sweetcakes_imagenes_borrar
+on storage.objects for delete
+to authenticated
+using (
+  bucket_id = 'encargos-imagenes'
+  and (
+    owner_id = (select auth.uid()::text)
+    or public.es_propietario()
+  )
+);
+
+-- 3) Extensiones. IF NOT EXISTS evita duplicarlas si ya están activas.
+create extension if not exists pg_net with schema extensions;
+create extension if not exists pg_cron;
+
+-- 4) Guardar URL y secreto del Cron cifrados en Vault.
+do $$
+declare
+  secreto_id uuid;
+begin
+  select id into secreto_id
+  from vault.decrypted_secrets
+  where name = 'sweetcakes_cleanup_url'
+  limit 1;
+
+  if secreto_id is null then
+    perform vault.create_secret(
+      '__SUPABASE_URL__',
+      'sweetcakes_cleanup_url',
+      'URL del proyecto para la limpieza de imágenes de Sweet Cakes'
+    );
+  else
+    perform vault.update_secret(
+      secreto_id,
+      '__SUPABASE_URL__',
+      'sweetcakes_cleanup_url',
+      'URL del proyecto para la limpieza de imágenes de Sweet Cakes'
+    );
+  end if;
+
+  select id into secreto_id
+  from vault.decrypted_secrets
+  where name = 'sweetcakes_cleanup_secret'
+  limit 1;
+
+  if secreto_id is null then
+    perform vault.create_secret(
+      '__CRON_SECRET__',
+      'sweetcakes_cleanup_secret',
+      'Secreto del Cron para limpiar imágenes antiguas de Sweet Cakes'
+    );
+  else
+    perform vault.update_secret(
+      secreto_id,
+      '__CRON_SECRET__',
+      'sweetcakes_cleanup_secret',
+      'Secreto del Cron para limpiar imágenes antiguas de Sweet Cakes'
+    );
+  end if;
+end $$;
+
+-- 5) Reemplazar el trabajo si ya existiera para impedir duplicados.
+do $$
+declare
+  trabajo_id bigint;
+begin
+  select jobid into trabajo_id
+  from cron.job
+  where jobname = 'sweetcakes-limpiar-imagenes-diario'
+  limit 1;
+
+  if trabajo_id is not null then
+    perform cron.unschedule(trabajo_id);
+  end if;
+end $$;
+
+-- 09:15 UTC = 03:15 AM en El Salvador.
+select cron.schedule(
+  'sweetcakes-limpiar-imagenes-diario',
+  '15 9 * * *',
+  $cron$
+  select net.http_post(
+    url := (
+      select decrypted_secret
+      from vault.decrypted_secrets
+      where name = 'sweetcakes_cleanup_url'
+      limit 1
+    ) || '/functions/v1/limpiar-imagenes-antiguas',
+    headers := jsonb_build_object(
+      'Content-Type', 'application/json',
+      'x-cron-secret', (
+        select decrypted_secret
+        from vault.decrypted_secrets
+        where name = 'sweetcakes_cleanup_secret'
+        limit 1
+      )
+    ),
+    body := jsonb_build_object('dryRun', false),
+    timeout_milliseconds := 30000
+  ) as request_id;
+  $cron$
+);
+
+-- 6) Comprobación final.
+select jobid, jobname, schedule, active
+from cron.job
+where jobname = 'sweetcakes-limpiar-imagenes-diario';
