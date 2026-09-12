@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
-import { CalendarDays, Clock3, ImagePlus, Phone, UploadCloud, User, X } from 'lucide-react'
+import { CalendarDays, Camera, Clock3, ImagePlus, Images, Phone, User, X } from 'lucide-react'
 
 import { supabase } from '../lib/supabase'
 import { eliminarImagenReferencia, subirImagenReferencia, validarImagen } from '../lib/imagenes'
@@ -148,22 +148,74 @@ function NuevoEncargo({ onGuardado }: NuevoEncargoProps) {
 
           <div className="mt-5 grid gap-5 lg:grid-cols-[0.9fr_1.1fr]">
             <div>
-              <label className="flex min-h-52 cursor-pointer flex-col items-center justify-center overflow-hidden rounded-2xl border-2 border-dashed border-[#DFC9D2] bg-[#FFFDFC] p-4 text-center hover:bg-[#FFF7FA]">
-                {preview ? (
-                  <img src={preview} alt="Vista previa" className="max-h-64 w-full rounded-xl object-contain" />
-                ) : (
-                  <><UploadCloud size={34} className="text-[#C98AA4]" /><p className="mt-3 font-semibold text-[#5C3A4D]">Seleccionar imagen de referencia</p><p className="mt-1 text-xs text-[#9A8B93]">También puedes tomar una foto desde el teléfono.</p></>
-                )}
-                <input type="file" accept="image/jpeg,image/png,image/webp" capture="environment" className="hidden" onChange={(e) => {
-                  const archivo = e.target.files?.[0] ?? null
-                  if (archivo) {
-                    const errorArchivo = validarImagen(archivo)
-                    if (errorArchivo) { setMensaje(errorArchivo); e.currentTarget.value = ''; return }
-                  }
-                  setImagenReferencia(archivo)
-                }} />
-              </label>
-              {imagenReferencia && <button type="button" onClick={() => setImagenReferencia(null)} className="mt-2 inline-flex items-center gap-1 text-xs font-semibold text-[#D93470]"><X size={14}/> Quitar imagen</button>}
+              <div className="min-h-52 overflow-hidden rounded-2xl border-2 border-dashed border-[#DFC9D2] bg-[#FFFDFC] p-4">
+                <div className="flex min-h-32 items-center justify-center text-center">
+                  {preview ? (
+                    <img src={preview} alt="Vista previa" className="max-h-64 w-full rounded-xl object-contain" />
+                  ) : (
+                    <div>
+                      <ImagePlus size={36} className="mx-auto text-[#C98AA4]" />
+                      <p className="mt-3 font-semibold text-[#5C3A4D]">Imagen de referencia</p>
+                      <p className="mt-1 text-xs leading-5 text-[#9A8B93]">Elige una imagen de la galería o toma una foto nueva.</p>
+                    </div>
+                  )}
+                </div>
+
+                <div className="mt-4 grid grid-cols-2 gap-2">
+                  <label className="flex min-h-12 cursor-pointer items-center justify-center gap-2 rounded-xl border border-[#E5D7DE] bg-white px-3 py-3 text-sm font-semibold text-[#5C3A4D] transition hover:bg-[#FFF7FA] active:scale-[0.99]">
+                    <Images size={18} className="text-[#EC3D7F]" />
+                    Galería
+                    <input
+                      type="file"
+                      accept="image/jpeg,image/png,image/webp"
+                      className="hidden"
+                      onChange={(e) => {
+                        const archivo = e.target.files?.[0] ?? null
+                        if (archivo) {
+                          const errorArchivo = validarImagen(archivo)
+                          if (errorArchivo) {
+                            setMensaje(errorArchivo)
+                            e.currentTarget.value = ''
+                            return
+                          }
+                        }
+                        setImagenReferencia(archivo)
+                      }}
+                    />
+                  </label>
+
+                  <label className="flex min-h-12 cursor-pointer items-center justify-center gap-2 rounded-xl bg-[#EC3D7F] px-3 py-3 text-sm font-semibold text-white transition hover:bg-[#D93470] active:scale-[0.99]">
+                    <Camera size={18} />
+                    Cámara
+                    <input
+                      type="file"
+                      accept="image/*"
+                      capture="environment"
+                      className="hidden"
+                      onChange={(e) => {
+                        const archivo = e.target.files?.[0] ?? null
+                        if (archivo) {
+                          const errorArchivo = validarImagen(archivo)
+                          if (errorArchivo) {
+                            setMensaje(errorArchivo)
+                            e.currentTarget.value = ''
+                            return
+                          }
+                        }
+                        setImagenReferencia(archivo)
+                      }}
+                    />
+                  </label>
+                </div>
+
+                <p className="mt-3 text-center text-[11px] leading-4 text-[#9A8B93]">El navegador o el teléfono solicitará acceso cuando sea necesario. Sweet Cakes no puede leer tu galería completa.</p>
+              </div>
+
+              {imagenReferencia && (
+                <button type="button" onClick={() => setImagenReferencia(null)} className="mt-2 inline-flex items-center gap-1 text-xs font-semibold text-[#D93470]">
+                  <X size={14}/> Quitar imagen
+                </button>
+              )}
             </div>
 
             <div className="space-y-4">
