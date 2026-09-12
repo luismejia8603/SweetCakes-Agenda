@@ -6,6 +6,7 @@ import {
   CheckCircle2,
   Clock3,
   ImageIcon,
+  PackageCheck,
   Phone,
   WalletCards,
 } from 'lucide-react'
@@ -25,6 +26,7 @@ function DetallePedido({ idPedido, onVolver }: DetallePedidoProps) {
   const [urlImagen, setUrlImagen] = useState<string | null>(null)
   const [cargando, setCargando] = useState(true)
   const [guardandoEstado, setGuardandoEstado] = useState(false)
+  const [guardandoPago, setGuardandoPago] = useState(false)
   const [error, setError] = useState('')
 
   useEffect(() => {
@@ -92,6 +94,62 @@ function DetallePedido({ idPedido, onVolver }: DetallePedidoProps) {
     setPedido({ ...pedido, estado_pedido: nuevoEstado })
   }
 
+  const marcarComoPagado = async () => {
+    if (!pedido) return
+
+    const pagoActual = obtenerPago(pedido)
+
+    if (pagoActual.saldo <= 0.005) return
+
+    const confirmado = window.confirm(
+      `¿Confirmas que el cliente pagó los $${pagoActual.saldo.toFixed(2)} pendientes?`
+    )
+
+    if (!confirmado) return
+
+    setGuardandoPago(true)
+    setError('')
+
+    const { error: errorSupabase } = await supabase
+      .from('encargos')
+      .update({ abono: pagoActual.total })
+      .eq('id', pedido.id)
+
+    setGuardandoPago(false)
+
+    if (errorSupabase) {
+      console.error(errorSupabase)
+      setError('No se pudo registrar el pago final.')
+      return
+    }
+
+    setPedido({ ...pedido, abono: pagoActual.total })
+  }
+
+  const marcarComoEntregado = async () => {
+    if (!pedido || pedido.estado_pedido === 'Entregado') return
+
+    const pagoActual = obtenerPago(pedido)
+
+    if (pagoActual.saldo > 0.005) {
+      setError('Primero debes registrar el pago pendiente antes de entregar el pedido.')
+      return
+    }
+
+    if (pedido.estado_pedido !== 'Listo') {
+      setError('Primero marca el pedido como Listo antes de entregarlo.')
+      return
+    }
+
+    const confirmado = window.confirm(
+      '¿Confirmas que el cliente ya retiró su pedido? Esta acción lo marcará como Entregado.'
+    )
+
+    if (!confirmado) return
+
+    await cambiarEstado('Entregado')
+  }
+
   if (cargando) {
     return (
       <main className="px-4 py-5 pb-28 sm:px-5 md:ml-20 md:p-6 lg:ml-64 lg:p-8 xl:p-10">
@@ -112,6 +170,12 @@ function DetallePedido({ idPedido, onVolver }: DetallePedidoProps) {
   }
 
   const pago = obtenerPago(pedido)
+  const pagoCompleto = pago.saldo <= 0.005
+  const pedidoListo = pedido.estado_pedido === 'Listo'
+  const pedidoEntregado = pedido.estado_pedido === 'Entregado'
+  const pedidoCancelado = pedido.estado_pedido === 'Cancelado'
+  const puedeEntregar = pagoCompleto && pedidoListo && !pedidoCancelado
+
   const fecha = fechaISOADate(pedido.fecha_entrega).toLocaleDateString('es-SV', {
     weekday: 'long',
     day: 'numeric',
@@ -193,9 +257,9 @@ function DetallePedido({ idPedido, onVolver }: DetallePedidoProps) {
               <WalletCards size={19} className="text-[#EC3D7F]" />
               <h3 className="text-base font-bold text-[#5C3A4D] sm:text-lg">Pago</h3>
             </div>
-            <div className={`mt-4 rounded-2xl p-4 ${pago.pagado ? 'bg-[#F1F8F3] text-[#557260]' : 'bg-[#FFF2F6] text-[#D93470]'}`}>
-              <p className="font-bold">{pago.estado}</p>
-              <p className="mt-1 text-sm">{pago.pagado ? 'No hay saldo pendiente.' : `Falta cobrar $${pago.saldo.toFixed(2)}`}</p>
+            <div className={`mt-4 rounded-2xl p-4 ${pagoCompleto ? 'bg-[#F1F8F3] text-[#557260]' : 'bg-[#FFF2F6] text-[#D93470]'}`}>
+              <p className="font-bold">{pagoCompleto ? 'Pagado' : pago.estado}</p>
+              <p className="mt-1 text-sm">{pagoCompleto ? 'No hay saldo pendiente.' : `Falta cobrar $${pago.saldo.toFixed(2)}`}</p>
             </div>
             <dl className="mt-4 space-y-3 text-sm">
               <FilaPago etiqueta="Precio total" valor={pago.total} />
@@ -206,13 +270,13 @@ function DetallePedido({ idPedido, onVolver }: DetallePedidoProps) {
 
           <section className="rounded-2xl border border-[#EEDDE3] bg-white p-4 sm:p-6">
             <h3 className="text-base font-bold text-[#5C3A4D] sm:text-lg">Estado de preparación</h3>
-            <p className="mt-1 text-xs text-[#756870] sm:text-sm">Actualiza el pedido según avanza el trabajo.</p>
+            <p className="mt-1 text-xs text-[#756870] sm:text-sm">Primero prepara el pedido. La entrega final se registra en el apartado de abajo.</p>
             <div className="mt-4 grid grid-cols-2 gap-2 xl:grid-cols-1">
-              {(['Pendiente', 'Listo', 'Entregado', 'Cancelado'] as EstadoPedido[]).map((estado) => (
+              {(['Pendiente', 'Listo', 'Cancelado'] as EstadoPedido[]).map((estado) => (
                 <button
                   key={estado}
                   type="button"
-                  disabled={guardandoEstado}
+                  disabled={guardandoEstado || pedidoEntregado}
                   onClick={() => cambiarEstado(estado)}
                   className={`min-h-12 rounded-xl border px-3 text-left text-sm font-semibold transition disabled:opacity-50 ${
                     pedido.estado_pedido === estado
@@ -220,9 +284,7 @@ function DetallePedido({ idPedido, onVolver }: DetallePedidoProps) {
                         ? 'border-[#EC3D7F] bg-[#FCE5ED] text-[#D93470]'
                         : estado === 'Listo'
                           ? 'border-[#BFA7B9] bg-[#F3EAF0] text-[#6F4C69]'
-                          : estado === 'Entregado'
-                            ? 'border-[#C8D7C2] bg-[#EEF3EB] text-[#64745D]'
-                            : 'border-[#D8D8D8] bg-[#F3F3F3] text-[#666]'
+                          : 'border-[#D8D8D8] bg-[#F3F3F3] text-[#666]'
                       : 'border-[#E5D7DE] bg-white text-[#756870] hover:bg-[#FBF1F4]'
                   }`}
                 >
@@ -230,6 +292,94 @@ function DetallePedido({ idPedido, onVolver }: DetallePedidoProps) {
                   {estado}
                 </button>
               ))}
+            </div>
+          </section>
+
+          <section className="rounded-2xl border border-[#E3D7DD] bg-gradient-to-b from-white to-[#FFF9FB] p-4 shadow-sm sm:p-6">
+            <div className="flex items-start gap-3">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#FCE5ED] text-[#D93470]">
+                <PackageCheck size={20} />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-[#5C3A4D] sm:text-lg">Entrega al cliente</h3>
+                <p className="mt-1 text-xs leading-5 text-[#756870] sm:text-sm">
+                  Cuando el cliente llegue, confirma el pago pendiente y después registra que ya retiró el pedido.
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-5 space-y-3">
+              <div className={`rounded-2xl border p-4 ${pagoCompleto ? 'border-[#D6E5D8] bg-[#F4F9F5]' : 'border-[#F3D2DE] bg-[#FFF5F8]'}`}>
+                <div className="flex items-start gap-3">
+                  <div className={`mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-bold ${pagoCompleto ? 'bg-[#DCEADF] text-[#557260]' : 'bg-[#FCE5ED] text-[#D93470]'}`}>
+                    {pagoCompleto ? <CheckCircle2 size={16} /> : '1'}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className={`font-bold ${pagoCompleto ? 'text-[#557260]' : 'text-[#5C3A4D]'}`}>
+                      {pagoCompleto ? 'Pago confirmado' : 'Cobrar saldo pendiente'}
+                    </p>
+                    <p className="mt-1 text-sm text-[#756870]">
+                      {pagoCompleto ? 'El pedido no tiene saldo por cobrar.' : `El cliente debe $${pago.saldo.toFixed(2)}.`}
+                    </p>
+
+                    {!pagoCompleto && !pedidoCancelado && !pedidoEntregado && (
+                      <button
+                        type="button"
+                        disabled={guardandoPago}
+                        onClick={marcarComoPagado}
+                        className="mt-3 inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-[#EC3D7F] px-4 text-sm font-bold text-white shadow-sm transition hover:bg-[#D93470] disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
+                      >
+                        <WalletCards size={17} />
+                        {guardandoPago ? 'Registrando pago...' : `Marcar como pagado · $${pago.saldo.toFixed(2)}`}
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              <div className={`rounded-2xl border p-4 ${pedidoEntregado ? 'border-[#D6E5D8] bg-[#F4F9F5]' : 'border-[#E5D7DE] bg-white'}`}>
+                <div className="flex items-start gap-3">
+                  <div className={`mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-bold ${pedidoEntregado ? 'bg-[#DCEADF] text-[#557260]' : 'bg-[#F3EAF0] text-[#6F4C69]'}`}>
+                    {pedidoEntregado ? <CheckCircle2 size={16} /> : '2'}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className={`font-bold ${pedidoEntregado ? 'text-[#557260]' : 'text-[#5C3A4D]'}`}>
+                      {pedidoEntregado ? 'Pedido entregado' : 'Confirmar retiro'}
+                    </p>
+                    <p className="mt-1 text-sm text-[#756870]">
+                      {pedidoEntregado
+                        ? 'El cliente ya retiró este pedido.'
+                        : !pagoCompleto
+                          ? 'Primero registra el pago pendiente para habilitar la entrega.'
+                          : !pedidoListo
+                            ? 'Primero marca el pedido como Listo para habilitar la entrega.'
+                            : 'Pago completo y pedido listo. Ya puedes registrar la entrega.'}
+                    </p>
+
+                    {!pedidoEntregado && !pedidoCancelado && (
+                      <button
+                        type="button"
+                        disabled={!puedeEntregar || guardandoEstado}
+                        onClick={marcarComoEntregado}
+                        className={`mt-3 inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-xl px-4 text-sm font-bold transition sm:w-auto ${
+                          puedeEntregar
+                            ? 'bg-[#66795E] text-white shadow-sm hover:bg-[#566A50]'
+                            : 'cursor-not-allowed bg-[#EEE9EC] text-[#A3939A]'
+                        }`}
+                      >
+                        <PackageCheck size={17} />
+                        {guardandoEstado ? 'Registrando entrega...' : 'Marcar como entregado'}
+                      </button>
+                    )}
+
+                    {pedidoCancelado && (
+                      <p className="mt-3 rounded-xl bg-[#F3F3F3] px-3 py-2 text-xs font-semibold text-[#777]">
+                        Este pedido está cancelado y no puede marcarse como entregado.
+                      </p>
+                    )}
+                  </div>
+                </div>
+              </div>
             </div>
           </section>
         </div>
