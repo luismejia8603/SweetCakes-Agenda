@@ -1,0 +1,8 @@
+{
+  "deno.enablePaths": ["./supabase/functions"],
+  "files.exclude": {
+    "**/backup-*": true,
+    "**/*.backup": true,
+    "supabase/.temp": true
+  }
+}

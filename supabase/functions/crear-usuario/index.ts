@@ -5,26 +5,51 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 }
 
+const obtenerSecretKey = () => {
+  const nuevas = Deno.env.get('SUPABASE_SECRET_KEYS')
+
+  if (nuevas) {
+    try {
+      const mapa = JSON.parse(nuevas) as Record<string, string>
+      if (mapa.default) return mapa.default
+
+      const primera = Object.values(mapa).find(Boolean)
+      if (primera) return primera
+    } catch (error) {
+      console.warn('No se pudo leer SUPABASE_SECRET_KEYS:', error)
+    }
+  }
+
+  return Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
 
   try {
-    const supabaseUrl = Deno.env.get('SUPABASE_URL')!
-    const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
+    const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? ''
+    const secretKey = obtenerSecretKey()
     const authHeader = req.headers.get('Authorization')
 
-    if (!authHeader) {
-      return Response.json({ error: 'Sesión no válida.' }, { status: 401, headers: corsHeaders })
+    if (!supabaseUrl || !secretKey) {
+      return Response.json(
+        { error: 'Faltan las credenciales internas de Supabase.' },
+        { status: 500, headers: corsHeaders },
+      )
     }
 
-    const admin = createClient(supabaseUrl, serviceRoleKey, {
+    if (!authHeader) {
+      return Response.json({ error: 'Sesion no valida.' }, { status: 401, headers: corsHeaders })
+    }
+
+    const admin = createClient(supabaseUrl, secretKey, {
       auth: { autoRefreshToken: false, persistSession: false },
     })
 
     const jwt = authHeader.replace(/^Bearer\s+/i, '')
     const { data: { user }, error: errorUsuario } = await admin.auth.getUser(jwt)
     if (errorUsuario || !user) {
-      return Response.json({ error: 'No se pudo verificar tu sesión.' }, { status: 401, headers: corsHeaders })
+      return Response.json({ error: 'No se pudo verificar tu sesion.' }, { status: 401, headers: corsHeaders })
     }
 
     const { data: perfil, error: errorPerfil } = await admin
@@ -44,9 +69,9 @@ Deno.serve(async (req) => {
     const rol = String(body.rol ?? '')
 
     if (!nombre) throw new Error('El nombre es obligatorio.')
-    if (!/^[a-z0-9._-]{3,30}$/.test(usuario)) throw new Error('El usuario no tiene un formato válido.')
-    if (password.length < 8) throw new Error('La contraseña debe tener al menos 8 caracteres.')
-    if (!['Empleado', 'Encargado'].includes(rol)) throw new Error('El rol solicitado no es válido.')
+    if (!/^[a-z0-9._-]{3,30}$/.test(usuario)) throw new Error('El usuario no tiene un formato valido.')
+    if (password.length < 8) throw new Error('La contrasena debe tener al menos 8 caracteres.')
+    if (!['Empleado', 'Encargado'].includes(rol)) throw new Error('El rol solicitado no es valido.')
 
     const email = `${usuario}@sweetcakes.test`
     const { data, error } = await admin.auth.admin.createUser({

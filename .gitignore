@@ -34,3 +34,14 @@ dist-ssr
 credentials.
 password
 secret
+
+# Sweet Cakes - local backups
+backup-*/
+*.backup
+*.bak
+
+# Supabase CLI local state
+supabase/.temp/
+
+# VS Code shared project settings
+!.vscode/settings.json
