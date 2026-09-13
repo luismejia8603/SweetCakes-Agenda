@@ -39,7 +39,7 @@ type DetallePedidoProps = {
 
 type ImagenVista = { id: string; ruta: string; url: string }
 
-const METODOS_PAGO: MetodoPago[] = ['Efectivo', 'Transferencia', 'Tarjeta', 'Otro']
+const METODOS_PAGO: MetodoPago[] = ['Efectivo', 'Transferencia']
 
 function DetallePedido({ idPedido, onVolver, onEditar }: DetallePedidoProps) {
   const [pedido, setPedido] = useState<Encargo | null>(null)
@@ -54,7 +54,10 @@ function DetallePedido({ idPedido, onVolver, onEditar }: DetallePedidoProps) {
   const [montoPago, setMontoPago] = useState('')
   const [fechaPago, setFechaPago] = useState(fechaLocalAISO(new Date()))
   const [metodoPago, setMetodoPago] = useState<MetodoPago>('Efectivo')
-  const [notaPago, setNotaPago] = useState('')
+  const [metodoCobroRapido, setMetodoCobroRapido] = useState<'Efectivo' | 'Transferencia'>('Efectivo')
+  const [mostrarAjustePrecio, setMostrarAjustePrecio] = useState(false)
+  const [nuevoPrecio, setNuevoPrecio] = useState('')
+  const [guardandoPrecio, setGuardandoPrecio] = useState(false)
   const [error, setError] = useState('')
   const [aviso, setAviso] = useState('')
 
@@ -162,7 +165,6 @@ function DetallePedido({ idPedido, onVolver, onEditar }: DetallePedidoProps) {
     setMontoPago(montoSugerido && montoSugerido > 0 ? montoSugerido.toFixed(2) : '')
     setFechaPago(fechaLocalAISO(new Date()))
     setMetodoPago('Efectivo')
-    setNotaPago('')
     setMostrarFormularioPago(true)
     window.setTimeout(() => document.getElementById('registrar-pago')?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 50)
   }
@@ -199,20 +201,96 @@ function DetallePedido({ idPedido, onVolver, onEditar }: DetallePedidoProps) {
         monto,
         fechaPago,
         metodoPago,
-        nota: notaPago,
         creadoPor: user.id,
       })
 
       await refrescarFinanzas()
       setMostrarFormularioPago(false)
       setMontoPago('')
-      setNotaPago('')
       setAviso(`✓ Pago de $${monto.toFixed(2)} registrado correctamente.`)
     } catch (errorPago) {
       console.error(errorPago)
       setError(errorPago instanceof Error ? errorPago.message : 'No se pudo registrar el pago.')
     } finally {
       setGuardandoPago(false)
+    }
+  }
+
+  const cobrarSaldoPendiente = async () => {
+    if (!pedido) return
+
+    const pagoActual = obtenerPago(pedido)
+    if (pagoActual.saldo <= 0.005) return
+
+    setGuardandoPago(true)
+    setError('')
+    setAviso('')
+
+    try {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) throw new Error('Tu sesión terminó. Inicia sesión nuevamente.')
+
+      await registrarPagoEncargo({
+        encargoId: pedido.id,
+        monto: pagoActual.saldo,
+        fechaPago: fechaLocalAISO(new Date()),
+        metodoPago: metodoCobroRapido,
+        creadoPor: user.id,
+      })
+
+      await refrescarFinanzas()
+      setAviso(`✓ Saldo de $${pagoActual.saldo.toFixed(2)} cobrado por ${metodoCobroRapido}.`)
+    } catch (errorPago) {
+      console.error(errorPago)
+      setError(errorPago instanceof Error ? errorPago.message : 'No se pudo cobrar el saldo pendiente.')
+    } finally {
+      setGuardandoPago(false)
+    }
+  }
+
+  const abrirAjustePrecio = () => {
+    if (!pedido) return
+    setError('')
+    setAviso('')
+    setNuevoPrecio(Number(pedido.precio_cotizado ?? 0).toFixed(2))
+    setMostrarAjustePrecio(true)
+  }
+
+  const guardarAjustePrecio = async () => {
+    if (!pedido) return
+
+    const precio = Number(nuevoPrecio.replace(',', '.'))
+    const totalPagado = obtenerPago(pedido).abono
+
+    if (!Number.isFinite(precio) || precio <= 0) {
+      setError('Ingresa un precio mayor que $0.')
+      return
+    }
+    if (precio + 0.005 < totalPagado) {
+      setError(`El precio no puede quedar por debajo de los $${totalPagado.toFixed(2)} ya pagados.`)
+      return
+    }
+
+    setGuardandoPrecio(true)
+    setError('')
+    setAviso('')
+
+    try {
+      const { error: errorPrecio } = await supabase
+        .from('encargos')
+        .update({ precio_cotizado: precio })
+        .eq('id', pedido.id)
+
+      if (errorPrecio) throw errorPrecio
+
+      await refrescarFinanzas()
+      setMostrarAjustePrecio(false)
+      setAviso(`✓ Precio actualizado a $${precio.toFixed(2)}.`)
+    } catch (errorPrecio) {
+      console.error(errorPrecio)
+      setError(errorPrecio instanceof Error ? errorPrecio.message : 'No se pudo actualizar el precio del pedido.')
+    } finally {
+      setGuardandoPrecio(false)
     }
   }
 
@@ -355,6 +433,16 @@ function DetallePedido({ idPedido, onVolver, onEditar }: DetallePedidoProps) {
             <h3 className="text-base font-bold text-[#5C3A4D] sm:text-lg">Indicaciones</h3>
             <div className="mt-4 space-y-4"><Texto etiqueta="Dedicatoria" valor={pedido.dedicatoria}/><Texto etiqueta="Observaciones" valor={pedido.observaciones}/></div>
           </section>
+
+          <section className="rounded-2xl border border-[#EEDDE3] bg-white p-4 sm:p-6">
+            <h3 className="text-base font-bold text-[#5C3A4D] sm:text-lg">Estado de preparación</h3>
+            <p className="mt-1 text-xs text-[#756870] sm:text-sm">Primero prepara el pedido. La entrega final se registra abajo.</p>
+            <div className="mt-4 grid grid-cols-2 gap-2 xl:grid-cols-1">
+              {(['Pendiente','Listo','Cancelado'] as EstadoPedido[]).map((estado) => (
+                <button key={estado} type="button" disabled={guardandoEstado || pedidoEntregado} onClick={() => cambiarEstado(estado)} className={`min-h-12 rounded-xl border px-3 text-left text-sm font-semibold transition disabled:opacity-50 ${pedido.estado_pedido === estado ? estado === 'Pendiente' ? 'border-[#EC3D7F] bg-[#FCE5ED] text-[#D93470]' : estado === 'Listo' ? 'border-[#BFA7B9] bg-[#F3EAF0] text-[#6F4C69]' : 'border-[#D8D8D8] bg-[#F3F3F3] text-[#666]' : 'border-[#E5D7DE] bg-white text-[#756870] hover:bg-[#FBF1F4]'}`}>{pedido.estado_pedido === estado && <CheckCircle2 size={16} className="mr-2 inline"/>}{estado}</button>
+              ))}
+            </div>
+          </section>
         </div>
 
         <div className="space-y-5 sm:space-y-6">
@@ -367,16 +455,33 @@ function DetallePedido({ idPedido, onVolver, onEditar }: DetallePedidoProps) {
             </div>
 
             <div className={`mt-4 rounded-2xl p-4 ${pagoCompleto ? 'bg-[#F1F8F3] text-[#557260]' : 'bg-[#FFF2F6] text-[#D93470]'}`}><p className="font-bold">{pagoCompleto ? 'Pagado' : pago.estado}</p><p className="mt-1 text-sm">{pagoCompleto ? 'No hay saldo pendiente.' : `Falta cobrar $${pago.saldo.toFixed(2)}`}</p></div>
-            <dl className="mt-4 space-y-3 text-sm"><FilaPago etiqueta="Precio total" valor={pago.total}/><FilaPago etiqueta="Total pagado" valor={pago.abono}/><FilaPago etiqueta="Saldo" valor={pago.saldo} fuerte/></dl>
+            <dl className="mt-4 space-y-3 text-sm"><FilaPago etiqueta="Precio actual" valor={pago.total}/><FilaPago etiqueta="Total pagado" valor={pago.abono}/><FilaPago etiqueta="Saldo" valor={pago.saldo} fuerte/></dl>
+
+            {!pedidoEntregado && !pedidoCancelado && (
+              <div className="mt-4 border-t border-[#F0E4E8] pt-4">
+                {!mostrarAjustePrecio ? (
+                  <button type="button" onClick={abrirAjustePrecio} className="inline-flex min-h-10 items-center gap-2 rounded-xl border border-[#E5D7DE] bg-white px-3 text-xs font-bold text-[#5C3A4D] hover:bg-[#FBF1F4]"><Pencil size={14}/> Ajustar precio del pedido</button>
+                ) : (
+                  <div className="rounded-xl border border-[#EEDDE3] bg-[#FFFDFC] p-3">
+                    <p className="text-xs font-semibold text-[#756870]">Precio actualizado</p>
+                    <p className="mt-1 text-xs leading-5 text-[#9A8B93]">Úsalo cuando el cliente agregue o quite especificaciones. No puede quedar por debajo de lo ya pagado.</p>
+                    <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+                      <input type="number" min="0.01" step="0.01" value={nuevoPrecio} onChange={(e) => setNuevoPrecio(e.target.value)} className="min-h-11 min-w-0 flex-1 rounded-xl border border-[#E5D7DE] bg-white px-3 text-[#5C3A4D] outline-none focus:border-[#EC3D7F]" />
+                      <button type="button" disabled={guardandoPrecio} onClick={guardarAjustePrecio} className="min-h-11 rounded-xl bg-[#6F4C69] px-4 text-sm font-bold text-white disabled:opacity-60">{guardandoPrecio ? 'Guardando...' : 'Actualizar precio'}</button>
+                      <button type="button" disabled={guardandoPrecio} onClick={() => setMostrarAjustePrecio(false)} className="min-h-11 rounded-xl border border-[#E5D7DE] bg-white px-4 text-sm font-semibold text-[#756870]">Cancelar</button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
 
             {mostrarFormularioPago && !pedidoEntregado && !pedidoCancelado && (
               <div className="mt-5 rounded-2xl border border-[#EEDDE3] bg-[#FFFDFC] p-4">
                 <div className="flex items-center justify-between gap-3"><div><p className="font-bold text-[#5C3A4D]">Registrar movimiento</p><p className="mt-0.5 text-xs text-[#9A8B93]">El saldo se recalculará automáticamente.</p></div><button type="button" onClick={() => setMostrarFormularioPago(false)} className="flex h-9 w-9 items-center justify-center rounded-full text-[#9A8B93] hover:bg-[#F6E6EB]"><X size={18}/></button></div>
-                <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                <div className="mt-4 grid gap-3 sm:grid-cols-3">
                   <label><span className="mb-1.5 block text-xs font-semibold text-[#756870]">Monto</span><input type="number" min="0.01" max={pago.saldo} step="0.01" value={montoPago} onChange={(e) => setMontoPago(e.target.value)} className="min-h-11 w-full rounded-xl border border-[#E5D7DE] bg-white px-3 text-[#5C3A4D] outline-none focus:border-[#EC3D7F]" placeholder="0.00" /></label>
                   <label><span className="mb-1.5 block text-xs font-semibold text-[#756870]">Fecha</span><input type="date" value={fechaPago} onChange={(e) => setFechaPago(e.target.value)} className="min-h-11 w-full rounded-xl border border-[#E5D7DE] bg-white px-3 text-[#5C3A4D] outline-none focus:border-[#EC3D7F]" /></label>
                   <label><span className="mb-1.5 block text-xs font-semibold text-[#756870]">Método</span><select value={metodoPago} onChange={(e) => setMetodoPago(e.target.value as MetodoPago)} className="min-h-11 w-full rounded-xl border border-[#E5D7DE] bg-white px-3 text-[#5C3A4D] outline-none focus:border-[#EC3D7F]">{METODOS_PAGO.map((metodo) => <option key={metodo} value={metodo}>{metodo}</option>)}</select></label>
-                  <label><span className="mb-1.5 block text-xs font-semibold text-[#756870]">Nota opcional</span><input value={notaPago} onChange={(e) => setNotaPago(e.target.value)} className="min-h-11 w-full rounded-xl border border-[#E5D7DE] bg-white px-3 text-[#5C3A4D] outline-none focus:border-[#EC3D7F]" placeholder="Ej. Segundo abono" /></label>
                 </div>
                 <button type="button" disabled={guardandoPago} onClick={guardarPago} className="mt-4 inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-xl bg-[#EC3D7F] px-4 text-sm font-bold text-white hover:bg-[#D93470] disabled:opacity-60"><WalletCards size={17}/>{guardandoPago ? 'Guardando pago...' : 'Guardar pago'}</button>
               </div>
@@ -402,21 +507,11 @@ function DetallePedido({ idPedido, onVolver, onEditar }: DetallePedidoProps) {
             </div>
           </section>
 
-          <section className="rounded-2xl border border-[#EEDDE3] bg-white p-4 sm:p-6">
-            <h3 className="text-base font-bold text-[#5C3A4D] sm:text-lg">Estado de preparación</h3>
-            <p className="mt-1 text-xs text-[#756870] sm:text-sm">Primero prepara el pedido. La entrega final se registra abajo.</p>
-            <div className="mt-4 grid grid-cols-2 gap-2 xl:grid-cols-1">
-              {(['Pendiente','Listo','Cancelado'] as EstadoPedido[]).map((estado) => (
-                <button key={estado} type="button" disabled={guardandoEstado || pedidoEntregado} onClick={() => cambiarEstado(estado)} className={`min-h-12 rounded-xl border px-3 text-left text-sm font-semibold transition disabled:opacity-50 ${pedido.estado_pedido === estado ? estado === 'Pendiente' ? 'border-[#EC3D7F] bg-[#FCE5ED] text-[#D93470]' : estado === 'Listo' ? 'border-[#BFA7B9] bg-[#F3EAF0] text-[#6F4C69]' : 'border-[#D8D8D8] bg-[#F3F3F3] text-[#666]' : 'border-[#E5D7DE] bg-white text-[#756870] hover:bg-[#FBF1F4]'}`}>{pedido.estado_pedido === estado && <CheckCircle2 size={16} className="mr-2 inline"/>}{estado}</button>
-              ))}
-            </div>
-          </section>
-
           <section className="rounded-2xl border border-[#E3D7DD] bg-gradient-to-b from-white to-[#FFF9FB] p-4 shadow-sm sm:p-6">
             <div className="flex items-start gap-3"><div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#FCE5ED] text-[#D93470]"><PackageCheck size={20}/></div><div><h3 className="text-base font-bold text-[#5C3A4D] sm:text-lg">Entrega al cliente</h3><p className="mt-1 text-xs leading-5 text-[#756870] sm:text-sm">Registra el saldo pendiente y después confirma que el cliente retiró el pedido.</p></div></div>
             <div className="mt-5 space-y-3">
               <div className={`rounded-2xl border p-4 ${pagoCompleto ? 'border-[#D6E5D8] bg-[#F4F9F5]' : 'border-[#F3D2DE] bg-[#FFF5F8]'}`}>
-                <div className="flex items-start gap-3"><div className={`mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-bold ${pagoCompleto ? 'bg-[#DCEADF] text-[#557260]' : 'bg-[#FCE5ED] text-[#D93470]'}`}>{pagoCompleto ? <CheckCircle2 size={16}/> : '1'}</div><div className="min-w-0 flex-1"><p className={`font-bold ${pagoCompleto ? 'text-[#557260]' : 'text-[#5C3A4D]'}`}>{pagoCompleto ? 'Pago confirmado' : 'Cobrar saldo pendiente'}</p><p className="mt-1 text-sm text-[#756870]">{pagoCompleto ? 'El pedido no tiene saldo por cobrar.' : `El cliente debe $${pago.saldo.toFixed(2)}.`}</p>{!pagoCompleto && !pedidoCancelado && !pedidoEntregado && <button type="button" onClick={() => abrirFormularioPago(pago.saldo)} className="mt-3 inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-[#EC3D7F] px-4 text-sm font-bold text-white hover:bg-[#D93470] sm:w-auto"><WalletCards size={17}/>Registrar pago final · ${pago.saldo.toFixed(2)}</button>}</div></div>
+                <div className="flex items-start gap-3"><div className={`mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-bold ${pagoCompleto ? 'bg-[#DCEADF] text-[#557260]' : 'bg-[#FCE5ED] text-[#D93470]'}`}>{pagoCompleto ? <CheckCircle2 size={16}/> : '1'}</div><div className="min-w-0 flex-1"><p className={`font-bold ${pagoCompleto ? 'text-[#557260]' : 'text-[#5C3A4D]'}`}>{pagoCompleto ? 'Pago confirmado' : 'Cobrar saldo pendiente'}</p><p className="mt-1 text-sm text-[#756870]">{pagoCompleto ? 'El pedido no tiene saldo por cobrar.' : `El cliente debe $${pago.saldo.toFixed(2)}.`}</p>{!pagoCompleto && !pedidoCancelado && !pedidoEntregado && <div className="mt-3 grid gap-2 sm:grid-cols-[170px_1fr]"><label><span className="mb-1.5 block text-xs font-semibold text-[#756870]">Método de cobro</span><select value={metodoCobroRapido} onChange={(e) => setMetodoCobroRapido(e.target.value as 'Efectivo' | 'Transferencia')} className="min-h-12 w-full rounded-xl border border-[#E5D7DE] bg-white px-3 text-sm font-semibold text-[#5C3A4D] outline-none focus:border-[#EC3D7F]"><option value="Efectivo">Efectivo</option><option value="Transferencia">Transferencia</option></select></label><button type="button" disabled={guardandoPago} onClick={cobrarSaldoPendiente} className="self-end inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-[#EC3D7F] px-4 text-sm font-bold text-white hover:bg-[#D93470] disabled:opacity-60"><WalletCards size={17}/>{guardandoPago ? 'Cobrando...' : `Cobrar saldo · $${pago.saldo.toFixed(2)}`}</button><p className="text-xs text-[#9A8B93] sm:col-span-2">Un toque registra el saldo completo como pago final.</p></div>}</div></div>
               </div>
               <div className={`rounded-2xl border p-4 ${pedidoEntregado ? 'border-[#D6E5D8] bg-[#F4F9F5]' : 'border-[#E5D7DE] bg-white'}`}>
                 <div className="flex items-start gap-3"><div className={`mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-bold ${pedidoEntregado ? 'bg-[#DCEADF] text-[#557260]' : 'bg-[#F3EAF0] text-[#6F4C69]'}`}>{pedidoEntregado ? <CheckCircle2 size={16}/> : '2'}</div><div className="min-w-0 flex-1"><p className={`font-bold ${pedidoEntregado ? 'text-[#557260]' : 'text-[#5C3A4D]'}`}>{pedidoEntregado ? 'Pedido entregado' : 'Confirmar retiro'}</p><p className="mt-1 text-sm text-[#756870]">{pedidoEntregado ? 'El cliente ya retiró este pedido.' : !pagoCompleto ? 'Primero registra el saldo pendiente.' : !pedidoListo ? 'Primero marca el pedido como Listo.' : 'El pago está completo. Ya puedes confirmar el retiro.'}</p>{!pedidoEntregado && !pedidoCancelado && <button type="button" disabled={guardandoEstado || !puedeEntregar} onClick={marcarComoEntregado} className="mt-3 inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-[#6F4C69] px-4 text-sm font-bold text-white hover:bg-[#5D3F58] disabled:cursor-not-allowed disabled:opacity-40 sm:w-auto"><PackageCheck size={17}/>{guardandoEstado ? 'Guardando...' : 'Marcar como entregado'}</button>}</div></div>

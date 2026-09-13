@@ -1,6 +1,6 @@
 import { supabase } from './supabase'
 
-export type MetodoPago = 'Efectivo' | 'Transferencia' | 'Tarjeta' | 'Otro' | 'No especificado'
+export type MetodoPago = 'Efectivo' | 'Transferencia' | 'Otro' | 'No especificado'
 
 export type PagoEncargo = {
   id: string

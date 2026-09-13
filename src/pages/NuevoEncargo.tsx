@@ -221,7 +221,7 @@ function NuevoEncargo({ onGuardado }: NuevoEncargoProps) {
           <div className="mt-5 grid gap-5 sm:grid-cols-2 xl:grid-cols-5">
             <label><span className="mb-2 block text-sm font-medium">Precio cotizado</span><input type="number" min="0" step="0.01" value={precioCotizado} onChange={(e) => setPrecioCotizado(e.target.value)} className="input-sc pl-4" placeholder="0.00" /></label>
             <label><span className="mb-2 block text-sm font-medium">Abono inicial</span><input type="number" min="0" max={precio || undefined} step="0.01" value={abono} onChange={(e) => setAbono(e.target.value)} className="input-sc pl-4" placeholder="0.00" /></label>
-            <Selector etiqueta="Método del abono" value={metodoAbono} onChange={setMetodoAbono} opciones={['Efectivo','Transferencia','Tarjeta','Otro']} />
+            <Selector etiqueta="Método del abono" value={metodoAbono} onChange={setMetodoAbono} opciones={['Efectivo','Transferencia']} />
             <div><span className="mb-2 block text-sm font-medium">Saldo pendiente</span><div className="rounded-xl border border-[#DCE4D8] bg-[#F8FAF6] px-4 py-3 font-bold text-[#64745D]">${saldo.toFixed(2)}</div></div>
             <Selector etiqueta="Estado" value={estadoPedido} onChange={setEstadoPedido} opciones={['Pendiente','Listo','Entregado','Cancelado']} />
           </div>

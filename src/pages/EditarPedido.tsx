@@ -281,9 +281,9 @@ function EditarPedido({ idPedido, onVolver, onGuardado }: EditarPedidoProps) {
 
         <section className="rounded-2xl border border-[#EEDDE3] bg-white p-4 sm:p-6">
           <h3 className="text-lg font-semibold text-[#5C3A4D]">Precio y pagos</h3>
-          <p className="mt-1 text-xs text-[#9A8B93]">Los pagos ya no se editan como un número acumulado. Registra o anula movimientos desde el detalle del pedido para conservar el historial.</p>
+          <p className="mt-1 text-xs text-[#9A8B93]">Puedes actualizar el precio si el cliente agrega o quita especificaciones. Los pagos se gestionan desde el detalle para conservar el historial.</p>
           <div className="mt-5 grid gap-5 sm:grid-cols-3">
-            <label><span className="mb-2 block text-sm font-medium">Precio cotizado</span><input type="number" min={totalPagado || 0} step="0.01" value={precioCotizado} onChange={(e) => setPrecioCotizado(e.target.value)} className="input-sc pl-4" /></label>
+            <label><span className="mb-2 block text-sm font-medium">Precio actual del pedido</span><input type="number" min="0.01" step="0.01" value={precioCotizado} onChange={(e) => setPrecioCotizado(e.target.value)} className="input-sc pl-4" /></label>
             <div><span className="mb-2 block text-sm font-medium">Total pagado</span><div className="min-h-12 rounded-xl border border-[#E5D7DE] bg-[#FFFDFC] px-4 py-3 font-bold text-[#5C3A4D]">${totalPagado.toFixed(2)}</div></div>
             <div><span className="mb-2 block text-sm font-medium">Saldo</span><div className="min-h-12 rounded-xl border border-[#DCE4D8] bg-[#F8FAF6] px-4 py-3 font-bold text-[#64745D]">${saldo.toFixed(2)}</div></div>
           </div>
