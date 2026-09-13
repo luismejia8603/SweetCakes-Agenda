@@ -14,12 +14,15 @@ import {
   Pencil,
   Phone,
   Plus,
+  Printer,
   WalletCards,
   X,
 } from 'lucide-react'
 
+import sweetCakesLogo from '../assets/sweet-cakes-logo.jpeg'
 import { cargarImagenesEncargo } from '../lib/encargoImagenes'
 import { obtenerUrlsImagenes } from '../lib/imagenes'
+import { imprimirHojaEncargo } from '../lib/imprimirHojaEncargo'
 import {
   anularPagoEncargo,
   cargarPagosEncargo,
@@ -39,7 +42,7 @@ type DetallePedidoProps = {
 
 type ImagenVista = { id: string; ruta: string; url: string }
 
-const METODOS_PAGO: MetodoPago[] = ['Efectivo', 'Transferencia']
+const METODOS_PAGO: MetodoPago[] = ['Efectivo', 'Transferencia', 'Otro']
 
 function DetallePedido({ idPedido, onVolver, onEditar }: DetallePedidoProps) {
   const [pedido, setPedido] = useState<Encargo | null>(null)
@@ -207,7 +210,7 @@ function DetallePedido({ idPedido, onVolver, onEditar }: DetallePedidoProps) {
       await refrescarFinanzas()
       setMostrarFormularioPago(false)
       setMontoPago('')
-      setAviso(`✓ Pago de $${monto.toFixed(2)} registrado correctamente.`)
+        setAviso(`✓ Pago de $${monto.toFixed(2)} registrado correctamente.`)
     } catch (errorPago) {
       console.error(errorPago)
       setError(errorPago instanceof Error ? errorPago.message : 'No se pudo registrar el pago.')
@@ -324,6 +327,24 @@ function DetallePedido({ idPedido, onVolver, onEditar }: DetallePedidoProps) {
     }
   }
 
+  const imprimirEncargo = () => {
+    if (!pedido) return
+
+    setError('')
+    setAviso('')
+
+    try {
+      imprimirHojaEncargo({
+        pedido,
+        imagenes: imagenes.map((imagen) => imagen.url),
+        logoUrl: sweetCakesLogo,
+      })
+    } catch (errorImpresion) {
+      console.error(errorImpresion)
+      setError(errorImpresion instanceof Error ? errorImpresion.message : 'No se pudo preparar la hoja de encargo.')
+    }
+  }
+
   const marcarComoEntregado = async () => {
     if (!pedido || pedido.estado_pedido === 'Entregado') return
     const pagoActual = obtenerPago(pedido)
@@ -374,6 +395,7 @@ function DetallePedido({ idPedido, onVolver, onEditar }: DetallePedidoProps) {
         <div className="mb-4 flex flex-wrap gap-2">
           <button type="button" onClick={onVolver} className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-[#E5D7DE] bg-white px-4 text-sm font-semibold text-[#5C3A4D] hover:bg-[#FBF1F4]"><ArrowLeft size={17}/> Volver</button>
           <button type="button" onClick={onEditar} className="inline-flex min-h-11 items-center gap-2 rounded-xl bg-[#EC3D7F] px-4 text-sm font-semibold text-white hover:bg-[#D93470]"><Pencil size={17}/> Editar pedido</button>
+          <button type="button" onClick={imprimirEncargo} className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-[#D9C6CF] bg-white px-4 text-sm font-semibold text-[#5C3A4D] hover:bg-[#FBF1F4]"><Printer size={17}/> Imprimir hoja</button>
         </div>
 
         <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#B07A91] sm:text-sm sm:normal-case sm:tracking-normal sm:text-[#756870]">Detalle del pedido</p>
