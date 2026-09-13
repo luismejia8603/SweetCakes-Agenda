@@ -54,7 +54,7 @@ const generarBloqueImagenes = (imagenes: string[]) => {
 }
 
 export const imprimirHojaEncargo = ({ pedido, imagenes, logoUrl }: DatosHojaEncargo) => {
-  const ventana = window.open('', '_blank', 'noopener,noreferrer')
+  const ventana = window.open('', '_blank')
 
   if (!ventana) {
     throw new Error('El navegador bloqueó la ventana de impresión. Permite ventanas emergentes para Sweet Cakes e inténtalo otra vez.')
@@ -211,28 +211,17 @@ export const imprimirHojaEncargo = ({ pedido, imagenes, logoUrl }: DatosHojaEnca
     </footer>
   </article>
 
-  <script>
-    (() => {
-      const imagenes = Array.from(document.images);
-      const esperarImagen = (imagen) => imagen.complete
-        ? Promise.resolve()
-        : new Promise((resolve) => {
-            imagen.addEventListener('load', resolve, { once: true });
-            imagen.addEventListener('error', resolve, { once: true });
-          });
-
-      Promise.all(imagenes.map(esperarImagen)).then(() => {
-        setTimeout(() => {
-          try { window.print(); } catch (_) {}
-        }, 250);
-      });
-    })();
-  </script>
 </body>
 </html>`
 
   ventana.document.open()
   ventana.document.write(html)
   ventana.document.close()
+
+  // Conservamos la referencia el tiempo suficiente para escribir la hoja y luego
+  // cortamos el acceso al origen. En Android/Chrome, pasar 'noopener' a
+  // window.open() hace que la llamada devuelva null aunque la pestaña se abra.
+  try { ventana.opener = null } catch { /* navegador sin soporte */ }
+
   ventana.focus()
 }
