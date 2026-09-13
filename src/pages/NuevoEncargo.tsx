@@ -1,9 +1,11 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useState } from 'react'
 import type { ReactNode } from 'react'
-import { CalendarDays, Camera, Clock3, ImagePlus, Images, Phone, User, X } from 'lucide-react'
+import { CalendarDays, Clock3, ImagePlus, Phone, User } from 'lucide-react'
 
+import SelectorImagenes from '../components/SelectorImagenes'
+import { insertarImagenesEncargo } from '../lib/encargoImagenes'
+import { eliminarImagenesReferencia, subirImagenesReferencia, validarImagen } from '../lib/imagenes'
 import { supabase } from '../lib/supabase'
-import { eliminarImagenReferencia, subirImagenReferencia, validarImagen } from '../lib/imagenes'
 import { fechaLocalAISO } from '../types/encargo'
 
 type NuevoEncargoProps = {
@@ -18,7 +20,7 @@ function NuevoEncargo({ onGuardado }: NuevoEncargoProps) {
   const [saborTorta, setSaborTorta] = useState('')
   const [saborRelleno, setSaborRelleno] = useState('')
   const [chantilly, setChantilly] = useState('')
-  const [imagenReferencia, setImagenReferencia] = useState<File | null>(null)
+  const [imagenesReferencia, setImagenesReferencia] = useState<File[]>([])
   const [dedicatoria, setDedicatoria] = useState('')
   const [observaciones, setObservaciones] = useState('')
   const [precioCotizado, setPrecioCotizado] = useState('')
@@ -31,14 +33,21 @@ function NuevoEncargo({ onGuardado }: NuevoEncargoProps) {
   const precio = Number(precioCotizado || 0)
   const abonoNumero = Number(abono || 0)
   const saldo = Math.max(precio - abonoNumero, 0)
-  const preview = useMemo(() => imagenReferencia ? URL.createObjectURL(imagenReferencia) : '', [imagenReferencia])
-
-  useEffect(() => () => { if (preview) URL.revokeObjectURL(preview) }, [preview])
 
   const limpiar = () => {
-    setNombreCliente(''); setTelefono(''); setFechaEntrega(''); setHoraEntrega('')
-    setSaborTorta(''); setSaborRelleno(''); setChantilly(''); setImagenReferencia(null)
-    setDedicatoria(''); setObservaciones(''); setPrecioCotizado(''); setAbono(''); setEstadoPedido('Pendiente')
+    setNombreCliente('')
+    setTelefono('')
+    setFechaEntrega('')
+    setHoraEntrega('')
+    setSaborTorta('')
+    setSaborRelleno('')
+    setChantilly('')
+    setImagenesReferencia([])
+    setDedicatoria('')
+    setObservaciones('')
+    setPrecioCotizado('')
+    setAbono('')
+    setEstadoPedido('Pendiente')
   }
 
   const validar = () => {
@@ -51,23 +60,34 @@ function NuevoEncargo({ onGuardado }: NuevoEncargoProps) {
     if (!chantilly) return 'Selecciona el chantilly.'
     if (precio <= 0) return 'El precio cotizado debe ser mayor que $0.'
     if (abonoNumero > precio) return 'El abono no puede ser mayor que el precio cotizado.'
-    if (imagenReferencia) return validarImagen(imagenReferencia)
+    if (imagenesReferencia.length > 5) return 'Puedes agregar como máximo 5 imágenes por pedido.'
+
+    for (const imagen of imagenesReferencia) {
+      const errorImagen = validarImagen(imagen)
+      if (errorImagen) return `${imagen.name}: ${errorImagen}`
+    }
+
     return ''
   }
 
   const guardarEncargo = async () => {
     const errorValidacion = validar()
-    if (errorValidacion) { setMensaje(errorValidacion); return }
+    if (errorValidacion) {
+      setMensaje(errorValidacion)
+      return
+    }
 
     setGuardando(true)
     setMensaje('')
-    let rutaImagen: string | null = null
+    let rutasSubidas: string[] = []
 
     try {
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) throw new Error('Tu sesión terminó. Inicia sesión nuevamente.')
 
-      if (imagenReferencia) rutaImagen = await subirImagenReferencia(imagenReferencia, user.id)
+      if (imagenesReferencia.length) {
+        rutasSubidas = await subirImagenesReferencia(imagenesReferencia, user.id)
+      }
 
       const { data, error } = await supabase
         .from('encargos')
@@ -79,7 +99,7 @@ function NuevoEncargo({ onGuardado }: NuevoEncargoProps) {
           sabor_torta: saborTorta,
           sabor_relleno: saborRelleno,
           chantilly,
-          imagen_referencia: rutaImagen,
+          imagen_referencia: rutasSubidas[0] ?? null,
           dedicatoria: dedicatoria.trim() || null,
           observaciones: observaciones.trim() || null,
           precio_cotizado: precio,
@@ -92,11 +112,27 @@ function NuevoEncargo({ onGuardado }: NuevoEncargoProps) {
 
       if (error) throw error
 
+      if (rutasSubidas.length) {
+        try {
+          await insertarImagenesEncargo(data.id, rutasSubidas, user.id)
+        } catch (errorImagenes) {
+          console.error('El pedido se guardó, pero falló el registro de imágenes:', errorImagenes)
+          // Conservamos la primera ruta en imagen_referencia para compatibilidad y retiramos
+          // las demás para no dejar archivos huérfanos.
+          if (rutasSubidas.length > 1) {
+            await eliminarImagenesReferencia(rutasSubidas.slice(1)).catch(() => undefined)
+          }
+          rutasSubidas = rutasSubidas.slice(0, 1)
+        }
+      }
+
       limpiar()
       setMensaje('✓ Encargo guardado correctamente.')
-      if (data?.id !== undefined) onGuardado?.(data.id)
+      onGuardado?.(data.id)
     } catch (error) {
-      if (rutaImagen) await eliminarImagenReferencia(rutaImagen)
+      if (rutasSubidas.length) {
+        await eliminarImagenesReferencia(rutasSubidas).catch(() => undefined)
+      }
       console.error(error)
       setMensaje(error instanceof Error ? error.message : 'No se pudo guardar el encargo.')
     } finally {
@@ -109,10 +145,10 @@ function NuevoEncargo({ onGuardado }: NuevoEncargoProps) {
       <header className="mb-6 sm:mb-8">
         <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#B07A91] sm:text-sm sm:normal-case sm:tracking-normal sm:text-[#756870]">Pedidos</p>
         <h2 className="mt-1 text-2xl font-bold text-[#5C3A4D] sm:text-3xl">Nuevo encargo</h2>
-        <p className="mt-2 text-sm text-[#756870]">Registra el pedido completo, incluida una imagen de referencia si el cliente la envió.</p>
+        <p className="mt-2 text-sm text-[#756870]">Registra el pedido y agrega hasta 5 imágenes de referencia.</p>
       </header>
 
-      <form onSubmit={(e) => e.preventDefault()} className="space-y-6">
+      <form onSubmit={(evento) => evento.preventDefault()} className="space-y-6">
         <section className="rounded-2xl border border-[#EEDDE3] bg-white p-4 sm:p-6">
           <h3 className="text-lg font-semibold text-[#5C3A4D]">Cliente y entrega</h3>
           <div className="mt-5 grid gap-5 md:grid-cols-2">
@@ -143,80 +179,20 @@ function NuevoEncargo({ onGuardado }: NuevoEncargoProps) {
         <section className="rounded-2xl border border-[#EEDDE3] bg-white p-4 sm:p-6">
           <div className="flex items-center gap-3">
             <div className="rounded-xl bg-[#F6E6EB] p-2 text-[#EC3D7F]"><ImagePlus size={20} /></div>
-            <div><h3 className="text-lg font-semibold text-[#5C3A4D]">Detalles e imagen</h3><p className="text-sm text-[#756870]">JPG, PNG o WEBP. Sweet Cakes la optimiza automáticamente antes de subirla.</p></div>
+            <div>
+              <h3 className="text-lg font-semibold text-[#5C3A4D]">Detalles e imágenes</h3>
+              <p className="text-sm text-[#756870]">Puedes guardar hasta 5 referencias. Cada una se optimiza antes de subirla.</p>
+            </div>
           </div>
 
           <div className="mt-5 grid gap-5 lg:grid-cols-[0.9fr_1.1fr]">
-            <div>
-              <div className="min-h-52 overflow-hidden rounded-2xl border-2 border-dashed border-[#DFC9D2] bg-[#FFFDFC] p-4">
-                <div className="flex min-h-32 items-center justify-center text-center">
-                  {preview ? (
-                    <img src={preview} alt="Vista previa" className="max-h-64 w-full rounded-xl object-contain" />
-                  ) : (
-                    <div>
-                      <ImagePlus size={36} className="mx-auto text-[#C98AA4]" />
-                      <p className="mt-3 font-semibold text-[#5C3A4D]">Imagen de referencia</p>
-                      <p className="mt-1 text-xs leading-5 text-[#9A8B93]">Elige una imagen de la galería o toma una foto nueva. Se reduce a un máximo de 1600 px y se comprime para ahorrar espacio.</p>
-                    </div>
-                  )}
-                </div>
-
-                <div className="mt-4 grid grid-cols-2 gap-2">
-                  <label className="flex min-h-12 cursor-pointer items-center justify-center gap-2 rounded-xl border border-[#E5D7DE] bg-white px-3 py-3 text-sm font-semibold text-[#5C3A4D] transition hover:bg-[#FFF7FA] active:scale-[0.99]">
-                    <Images size={18} className="text-[#EC3D7F]" />
-                    Galería
-                    <input
-                      type="file"
-                      accept="image/jpeg,image/png,image/webp"
-                      className="hidden"
-                      onChange={(e) => {
-                        const archivo = e.target.files?.[0] ?? null
-                        if (archivo) {
-                          const errorArchivo = validarImagen(archivo)
-                          if (errorArchivo) {
-                            setMensaje(errorArchivo)
-                            e.currentTarget.value = ''
-                            return
-                          }
-                        }
-                        setImagenReferencia(archivo)
-                      }}
-                    />
-                  </label>
-
-                  <label className="flex min-h-12 cursor-pointer items-center justify-center gap-2 rounded-xl bg-[#EC3D7F] px-3 py-3 text-sm font-semibold text-white transition hover:bg-[#D93470] active:scale-[0.99]">
-                    <Camera size={18} />
-                    Cámara
-                    <input
-                      type="file"
-                      accept="image/*"
-                      capture="environment"
-                      className="hidden"
-                      onChange={(e) => {
-                        const archivo = e.target.files?.[0] ?? null
-                        if (archivo) {
-                          const errorArchivo = validarImagen(archivo)
-                          if (errorArchivo) {
-                            setMensaje(errorArchivo)
-                            e.currentTarget.value = ''
-                            return
-                          }
-                        }
-                        setImagenReferencia(archivo)
-                      }}
-                    />
-                  </label>
-                </div>
-
-                <p className="mt-3 text-center text-[11px] leading-4 text-[#9A8B93]">El navegador o el teléfono solicitará acceso cuando sea necesario. Se aceptan originales de hasta 20 MB y la versión guardada se comprime automáticamente.</p>
-              </div>
-
-              {imagenReferencia && (
-                <button type="button" onClick={() => setImagenReferencia(null)} className="mt-2 inline-flex items-center gap-1 text-xs font-semibold text-[#D93470]">
-                  <X size={14}/> Quitar imagen
-                </button>
-              )}
-            </div>
+            <SelectorImagenes
+              archivos={imagenesReferencia}
+              onChange={setImagenesReferencia}
+              maximo={5}
+              deshabilitado={guardando}
+              onError={setMensaje}
+            />
 
             <div className="space-y-4">
               <label className="block"><span className="mb-2 block text-sm font-medium text-[#5C3A4D]">Dedicatoria <span className="font-normal text-[#9A8B93]">(opcional)</span></span><input value={dedicatoria} onChange={(e) => setDedicatoria(e.target.value)} placeholder="Ej. Feliz cumpleaños Mario" className="input-sc pl-4" /></label>
@@ -239,7 +215,7 @@ function NuevoEncargo({ onGuardado }: NuevoEncargoProps) {
 
         <div className="sticky bottom-[84px] z-30 -mx-4 flex justify-end border-t border-[#EEDDE3] bg-[#FFF9F7]/95 px-4 py-3 backdrop-blur md:static md:mx-0 md:border-0 md:bg-transparent md:px-0 md:py-0 md:pb-6">
           <button type="button" onClick={guardarEncargo} disabled={guardando} className="min-h-12 w-full rounded-xl bg-[#EC3D7F] px-7 py-3.5 font-semibold text-white shadow-[0_10px_24px_rgba(236,61,127,0.2)] hover:bg-[#D93470] disabled:opacity-60 md:w-auto">
-            {guardando ? 'Guardando pedido e imagen...' : 'Guardar encargo'}
+            {guardando ? `Guardando${imagenesReferencia.length ? ' e imágenes' : ''}...` : 'Guardar encargo'}
           </button>
         </div>
       </form>

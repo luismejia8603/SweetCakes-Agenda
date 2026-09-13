@@ -5,6 +5,7 @@ import { supabase } from './lib/supabase'
 import Sidebar from './components/Sidebar'
 import Calendario from './pages/Calendario'
 import DetallePedido from './pages/DetallePedido'
+import EditarPedido from './pages/EditarPedido'
 import Inicio from './pages/Inicio'
 import Login from './pages/Login'
 import NuevoEncargo from './pages/NuevoEncargo'
@@ -179,6 +180,10 @@ function App() {
     aplicarNavegacion('detalle', null, id, anterior)
   }
 
+  const editarPedido = (id: string | number) => {
+    aplicarNavegacion('editar', null, id, 'detalle')
+  }
+
   const volverDentroDeLaApp = (paginaRespaldo: string) => {
     if (nivelHistorial.current > 0) {
       window.history.back()
@@ -204,7 +209,9 @@ function App() {
       : paginaAnterior === 'inicio'
         ? 'inicio'
         : 'pedidos'
-    : paginaActual === 'detalle'
+    : paginaActual === 'editar'
+      ? 'pedidos'
+      : paginaActual === 'detalle'
       ? paginaAnterior === 'calendario'
         ? 'calendario'
         : paginaAnterior === 'inicio'
@@ -254,6 +261,16 @@ function App() {
           <DetallePedido
             idPedido={pedidoSeleccionado}
             onVolver={() => volverDentroDeLaApp(paginaAnterior === 'detalle' ? 'pedidos' : paginaAnterior)}
+            onEditar={() => editarPedido(pedidoSeleccionado)}
+          />
+        )}
+
+
+        {paginaActual === 'editar' && pedidoSeleccionado !== null && (
+          <EditarPedido
+            idPedido={pedidoSeleccionado}
+            onVolver={() => volverDentroDeLaApp('detalle')}
+            onGuardado={() => volverDentroDeLaApp('detalle')}
           />
         )}
 

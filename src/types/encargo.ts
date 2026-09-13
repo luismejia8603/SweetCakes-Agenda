@@ -1,5 +1,14 @@
 export type EstadoPedido = 'Pendiente' | 'Listo' | 'Entregado' | 'Cancelado'
 
+export type ImagenEncargo = {
+  id: string
+  encargo_id: string | number
+  ruta_storage: string
+  orden: number
+  creado_por?: string | null
+  created_at?: string | null
+}
+
 export type Encargo = {
   id: string | number
   nombre_cliente: string

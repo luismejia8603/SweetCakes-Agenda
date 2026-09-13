@@ -160,7 +160,10 @@ export const comprimirImagenReferencia = async (archivo: File) => {
 
 export const subirImagenReferencia = async (archivo: File, usuarioId: string) => {
   const archivoOptimizado = await comprimirImagenReferencia(archivo)
-  const ruta = `${usuarioId}/${Date.now()}-${archivoOptimizado.name}`
+  const identificador = typeof crypto !== 'undefined' && 'randomUUID' in crypto
+    ? crypto.randomUUID()
+    : `${Date.now()}-${Math.random().toString(36).slice(2)}`
+  const ruta = `${usuarioId}/${Date.now()}-${identificador}-${archivoOptimizado.name}`
 
   const { error } = await supabase.storage.from(BUCKET).upload(ruta, archivoOptimizado, {
     cacheControl: '3600',
@@ -168,33 +171,45 @@ export const subirImagenReferencia = async (archivo: File, usuarioId: string) =>
     upsert: false,
   })
 
-  if (error) {
-    throw error
-  }
-
+  if (error) throw error
   return ruta
 }
 
-export const eliminarImagenReferencia = async (ruta: string) => {
-  if (!ruta || ruta.startsWith('http')) {
-    return
-  }
+export const subirImagenesReferencia = async (archivos: File[], usuarioId: string) => {
+  const rutas: string[] = []
 
-  const { error } = await supabase.storage.from(BUCKET).remove([ruta])
-
-  if (error) {
-    console.error('No se pudo eliminar la imagen de referencia:', error)
+  try {
+    for (const archivo of archivos) {
+      rutas.push(await subirImagenReferencia(archivo, usuarioId))
+    }
+    return rutas
+  } catch (error) {
+    if (rutas.length) {
+      await eliminarImagenesReferencia(rutas).catch(() => undefined)
+    }
+    throw error
   }
 }
 
-export const obtenerUrlImagen = async (ruta: string | null) => {
-  if (!ruta) {
-    return null
-  }
+export const eliminarImagenReferencia = async (ruta: string) => {
+  if (!ruta || ruta.startsWith('http')) return
+  await eliminarImagenesReferencia([ruta])
+}
 
-  if (ruta.startsWith('http://') || ruta.startsWith('https://')) {
-    return ruta
-  }
+export const eliminarImagenesReferencia = async (rutas: string[]) => {
+  const rutasValidas = Array.from(
+    new Set(rutas.map((ruta) => ruta.trim()).filter((ruta) => ruta && !ruta.startsWith('http'))),
+  )
+
+  if (!rutasValidas.length) return
+
+  const { error } = await supabase.storage.from(BUCKET).remove(rutasValidas)
+  if (error) throw error
+}
+
+export const obtenerUrlImagen = async (ruta: string | null) => {
+  if (!ruta) return null
+  if (ruta.startsWith('http://') || ruta.startsWith('https://')) return ruta
 
   const { data, error } = await supabase.storage
     .from(BUCKET)
@@ -206,4 +221,11 @@ export const obtenerUrlImagen = async (ruta: string | null) => {
   }
 
   return data.signedUrl
+}
+
+export const obtenerUrlsImagenes = async (rutas: string[]) => {
+  const resultados = await Promise.all(
+    rutas.map(async (ruta) => ({ ruta, url: await obtenerUrlImagen(ruta) })),
+  )
+  return resultados.filter((resultado): resultado is { ruta: string; url: string } => Boolean(resultado.url))
 }
