@@ -25,6 +25,7 @@ function NuevoEncargo({ onGuardado }: NuevoEncargoProps) {
   const [observaciones, setObservaciones] = useState('')
   const [precioCotizado, setPrecioCotizado] = useState('')
   const [abono, setAbono] = useState('')
+  const [metodoAbono, setMetodoAbono] = useState('Efectivo')
   const [estadoPedido, setEstadoPedido] = useState('Pendiente')
   const [mensaje, setMensaje] = useState('')
   const [guardando, setGuardando] = useState(false)
@@ -47,6 +48,7 @@ function NuevoEncargo({ onGuardado }: NuevoEncargoProps) {
     setObservaciones('')
     setPrecioCotizado('')
     setAbono('')
+    setMetodoAbono('Efectivo')
     setEstadoPedido('Pendiente')
   }
 
@@ -111,6 +113,18 @@ function NuevoEncargo({ onGuardado }: NuevoEncargoProps) {
         .single()
 
       if (error) throw error
+
+      if (abonoNumero > 0) {
+        const { error: errorMetodoPago } = await supabase
+          .from('encargo_pagos')
+          .update({ metodo_pago: metodoAbono })
+          .eq('encargo_id', data.id)
+          .eq('nota', 'Abono inicial')
+
+        if (errorMetodoPago) {
+          console.warn('El abono se registró, pero no se pudo guardar su método de pago:', errorMetodoPago)
+        }
+      }
 
       if (rutasSubidas.length) {
         try {
@@ -203,9 +217,11 @@ function NuevoEncargo({ onGuardado }: NuevoEncargoProps) {
 
         <section className="rounded-2xl border border-[#EEDDE3] bg-white p-4 sm:p-6">
           <h3 className="text-lg font-semibold text-[#5C3A4D]">Pago y estado</h3>
-          <div className="mt-5 grid gap-5 sm:grid-cols-2 xl:grid-cols-4">
+          <p className="mt-1 text-xs text-[#9A8B93]">Si el cliente deja dinero al crear el pedido, se guardará como el primer movimiento del historial de pagos.</p>
+          <div className="mt-5 grid gap-5 sm:grid-cols-2 xl:grid-cols-5">
             <label><span className="mb-2 block text-sm font-medium">Precio cotizado</span><input type="number" min="0" step="0.01" value={precioCotizado} onChange={(e) => setPrecioCotizado(e.target.value)} className="input-sc pl-4" placeholder="0.00" /></label>
-            <label><span className="mb-2 block text-sm font-medium">Abono</span><input type="number" min="0" max={precio || undefined} step="0.01" value={abono} onChange={(e) => setAbono(e.target.value)} className="input-sc pl-4" placeholder="0.00" /></label>
+            <label><span className="mb-2 block text-sm font-medium">Abono inicial</span><input type="number" min="0" max={precio || undefined} step="0.01" value={abono} onChange={(e) => setAbono(e.target.value)} className="input-sc pl-4" placeholder="0.00" /></label>
+            <Selector etiqueta="Método del abono" value={metodoAbono} onChange={setMetodoAbono} opciones={['Efectivo','Transferencia','Tarjeta','Otro']} />
             <div><span className="mb-2 block text-sm font-medium">Saldo pendiente</span><div className="rounded-xl border border-[#DCE4D8] bg-[#F8FAF6] px-4 py-3 font-bold text-[#64745D]">${saldo.toFixed(2)}</div></div>
             <Selector etiqueta="Estado" value={estadoPedido} onChange={setEstadoPedido} opciones={['Pendiente','Listo','Entregado','Cancelado']} />
           </div>

@@ -2,23 +2,34 @@ import { useEffect, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
 import {
   ArrowLeft,
+  Ban,
   CakeSlice,
   CheckCircle2,
   ChevronLeft,
   ChevronRight,
   Clock3,
+  History,
   ImageIcon,
   PackageCheck,
   Pencil,
   Phone,
+  Plus,
   WalletCards,
+  X,
 } from 'lucide-react'
 
 import { cargarImagenesEncargo } from '../lib/encargoImagenes'
 import { obtenerUrlsImagenes } from '../lib/imagenes'
+import {
+  anularPagoEncargo,
+  cargarPagosEncargo,
+  registrarPagoEncargo,
+  type MetodoPago,
+  type PagoEncargo,
+} from '../lib/pagos'
 import { supabase } from '../lib/supabase'
 import type { Encargo, EstadoPedido } from '../types/encargo'
-import { fechaISOADate, formatearHora, obtenerPago } from '../types/encargo'
+import { fechaISOADate, fechaLocalAISO, formatearHora, obtenerPago } from '../types/encargo'
 
 type DetallePedidoProps = {
   idPedido: string | number
@@ -28,14 +39,24 @@ type DetallePedidoProps = {
 
 type ImagenVista = { id: string; ruta: string; url: string }
 
+const METODOS_PAGO: MetodoPago[] = ['Efectivo', 'Transferencia', 'Tarjeta', 'Otro']
+
 function DetallePedido({ idPedido, onVolver, onEditar }: DetallePedidoProps) {
   const [pedido, setPedido] = useState<Encargo | null>(null)
   const [imagenes, setImagenes] = useState<ImagenVista[]>([])
+  const [pagos, setPagos] = useState<PagoEncargo[]>([])
   const [indiceImagen, setIndiceImagen] = useState(0)
   const [cargando, setCargando] = useState(true)
   const [guardandoEstado, setGuardandoEstado] = useState(false)
   const [guardandoPago, setGuardandoPago] = useState(false)
+  const [anulandoPagoId, setAnulandoPagoId] = useState<string | null>(null)
+  const [mostrarFormularioPago, setMostrarFormularioPago] = useState(false)
+  const [montoPago, setMontoPago] = useState('')
+  const [fechaPago, setFechaPago] = useState(fechaLocalAISO(new Date()))
+  const [metodoPago, setMetodoPago] = useState<MetodoPago>('Efectivo')
+  const [notaPago, setNotaPago] = useState('')
   const [error, setError] = useState('')
+  const [aviso, setAviso] = useState('')
 
   useEffect(() => {
     let activo = true
@@ -43,6 +64,7 @@ function DetallePedido({ idPedido, onVolver, onEditar }: DetallePedidoProps) {
     const cargar = async () => {
       setCargando(true)
       setError('')
+      setAviso('')
 
       const { data, error: errorSupabase } = await supabase
         .from('encargos')
@@ -63,17 +85,27 @@ function DetallePedido({ idPedido, onVolver, onEditar }: DetallePedidoProps) {
       const encargo = data as Encargo
       setPedido(encargo)
 
-      const registros = await cargarImagenesEncargo(encargo.id, encargo.imagen_referencia)
-      const urls = await obtenerUrlsImagenes(registros.map((imagen) => imagen.ruta_storage))
-      const mapaUrls = new Map(urls.map((item) => [item.ruta, item.url]))
-      const vistas = registros
-        .map((imagen) => ({ id: imagen.id, ruta: imagen.ruta_storage, url: mapaUrls.get(imagen.ruta_storage) ?? '' }))
-        .filter((imagen) => Boolean(imagen.url))
+      try {
+        const [registros, historialPagos] = await Promise.all([
+          cargarImagenesEncargo(encargo.id, encargo.imagen_referencia),
+          cargarPagosEncargo(encargo.id),
+        ])
+        const urls = await obtenerUrlsImagenes(registros.map((imagen) => imagen.ruta_storage))
+        const mapaUrls = new Map(urls.map((item) => [item.ruta, item.url]))
+        const vistas = registros
+          .map((imagen) => ({ id: imagen.id, ruta: imagen.ruta_storage, url: mapaUrls.get(imagen.ruta_storage) ?? '' }))
+          .filter((imagen) => Boolean(imagen.url))
 
-      if (activo) {
-        setImagenes(vistas)
-        setIndiceImagen(0)
-        setCargando(false)
+        if (activo) {
+          setImagenes(vistas)
+          setPagos(historialPagos)
+          setIndiceImagen(0)
+        }
+      } catch (errorCarga) {
+        console.error(errorCarga)
+        if (activo) setError('El pedido cargó, pero no se pudo leer toda la información asociada.')
+      } finally {
+        if (activo) setCargando(false)
       }
     }
 
@@ -81,11 +113,32 @@ function DetallePedido({ idPedido, onVolver, onEditar }: DetallePedidoProps) {
     return () => { activo = false }
   }, [idPedido])
 
+  const refrescarFinanzas = async () => {
+    const [historialPagos, respuestaPedido] = await Promise.all([
+      cargarPagosEncargo(idPedido),
+      supabase
+        .from('encargos')
+        .select('abono,precio_cotizado')
+        .eq('id', idPedido)
+        .single(),
+    ])
+
+    if (respuestaPedido.error) throw respuestaPedido.error
+
+    setPagos(historialPagos)
+    setPedido((actual) => actual ? {
+      ...actual,
+      abono: respuestaPedido.data.abono,
+      precio_cotizado: respuestaPedido.data.precio_cotizado,
+    } : actual)
+  }
+
   const cambiarEstado = async (nuevoEstado: EstadoPedido) => {
     if (!pedido || pedido.estado_pedido === nuevoEstado) return
 
     setGuardandoEstado(true)
     setError('')
+    setAviso('')
 
     const { error: errorSupabase } = await supabase
       .from('encargos')
@@ -103,31 +156,94 @@ function DetallePedido({ idPedido, onVolver, onEditar }: DetallePedidoProps) {
     setPedido({ ...pedido, estado_pedido: nuevoEstado })
   }
 
-  const marcarComoPagado = async () => {
-    if (!pedido) return
-    const pagoActual = obtenerPago(pedido)
-    if (pagoActual.saldo <= 0.005) return
-
-    const confirmado = window.confirm(`¿Confirmas que el cliente pagó los $${pagoActual.saldo.toFixed(2)} pendientes?`)
-    if (!confirmado) return
-
-    setGuardandoPago(true)
+  const abrirFormularioPago = (montoSugerido?: number) => {
     setError('')
+    setAviso('')
+    setMontoPago(montoSugerido && montoSugerido > 0 ? montoSugerido.toFixed(2) : '')
+    setFechaPago(fechaLocalAISO(new Date()))
+    setMetodoPago('Efectivo')
+    setNotaPago('')
+    setMostrarFormularioPago(true)
+    window.setTimeout(() => document.getElementById('registrar-pago')?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 50)
+  }
 
-    const { error: errorSupabase } = await supabase
-      .from('encargos')
-      .update({ abono: pagoActual.total })
-      .eq('id', pedido.id)
+  const guardarPago = async () => {
+    if (!pedido) return
 
-    setGuardandoPago(false)
+    const monto = Number(montoPago.replace(',', '.'))
+    const pagoActual = obtenerPago(pedido)
 
-    if (errorSupabase) {
-      console.error(errorSupabase)
-      setError('No se pudo registrar el pago final.')
+    if (!Number.isFinite(monto) || monto <= 0) {
+      setError('Ingresa un monto de pago mayor que $0.')
+      return
+    }
+    if (monto > pagoActual.saldo + 0.005) {
+      setError(`El pago no puede superar el saldo pendiente de $${pagoActual.saldo.toFixed(2)}.`)
+      return
+    }
+    if (!fechaPago) {
+      setError('Selecciona la fecha del pago.')
       return
     }
 
-    setPedido({ ...pedido, abono: pagoActual.total })
+    setGuardandoPago(true)
+    setError('')
+    setAviso('')
+
+    try {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) throw new Error('Tu sesión terminó. Inicia sesión nuevamente.')
+
+      await registrarPagoEncargo({
+        encargoId: pedido.id,
+        monto,
+        fechaPago,
+        metodoPago,
+        nota: notaPago,
+        creadoPor: user.id,
+      })
+
+      await refrescarFinanzas()
+      setMostrarFormularioPago(false)
+      setMontoPago('')
+      setNotaPago('')
+      setAviso(`✓ Pago de $${monto.toFixed(2)} registrado correctamente.`)
+    } catch (errorPago) {
+      console.error(errorPago)
+      setError(errorPago instanceof Error ? errorPago.message : 'No se pudo registrar el pago.')
+    } finally {
+      setGuardandoPago(false)
+    }
+  }
+
+  const anularPago = async (pagoMovimiento: PagoEncargo) => {
+    if (!pedido || pagoMovimiento.anulado) return
+
+    if (pedido.estado_pedido === 'Entregado') {
+      setError('No se puede anular un pago desde aquí porque el pedido ya fue entregado.')
+      return
+    }
+
+    const motivo = window.prompt('Escribe el motivo de la anulación. El movimiento seguirá visible en el historial:')
+    if (motivo === null) return
+
+    setAnulandoPagoId(pagoMovimiento.id)
+    setError('')
+    setAviso('')
+
+    try {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) throw new Error('Tu sesión terminó. Inicia sesión nuevamente.')
+
+      await anularPagoEncargo(pagoMovimiento.id, motivo, user.id)
+      await refrescarFinanzas()
+      setAviso('✓ Pago anulado. El historial se conservó y el saldo fue recalculado.')
+    } catch (errorAnular) {
+      console.error(errorAnular)
+      setError(errorAnular instanceof Error ? errorAnular.message : 'No se pudo anular el pago.')
+    } finally {
+      setAnulandoPagoId(null)
+    }
   }
 
   const marcarComoEntregado = async () => {
@@ -188,6 +304,7 @@ function DetallePedido({ idPedido, onVolver, onEditar }: DetallePedidoProps) {
       </header>
 
       {error && <div className="mb-5 rounded-xl bg-[#FFF0F5] px-4 py-3 text-sm font-semibold text-[#D93470]">{error}</div>}
+      {aviso && <div className="mb-5 rounded-xl bg-[#EEF3EB] px-4 py-3 text-sm font-semibold text-[#557260]">{aviso}</div>}
 
       <div className="grid gap-5 xl:grid-cols-[1.2fr_0.8fr] xl:gap-6">
         <div className="space-y-5 sm:space-y-6">
@@ -241,10 +358,48 @@ function DetallePedido({ idPedido, onVolver, onEditar }: DetallePedidoProps) {
         </div>
 
         <div className="space-y-5 sm:space-y-6">
-          <section className="rounded-2xl border border-[#EEDDE3] bg-white p-4 sm:p-6">
-            <div className="flex items-center gap-2"><WalletCards size={19} className="text-[#EC3D7F]"/><h3 className="text-base font-bold text-[#5C3A4D] sm:text-lg">Pago</h3></div>
+          <section id="registrar-pago" className="rounded-2xl border border-[#EEDDE3] bg-white p-4 sm:p-6">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="flex items-center gap-2"><WalletCards size={19} className="text-[#EC3D7F]"/><h3 className="text-base font-bold text-[#5C3A4D] sm:text-lg">Pagos</h3></div>
+              {!pagoCompleto && !pedidoCancelado && !pedidoEntregado && (
+                <button type="button" onClick={() => abrirFormularioPago()} className="inline-flex min-h-10 items-center gap-1.5 rounded-xl border border-[#E9CAD5] bg-[#FFF5F8] px-3 text-xs font-bold text-[#D93470] hover:bg-[#FCE5ED]"><Plus size={15}/> Registrar pago</button>
+              )}
+            </div>
+
             <div className={`mt-4 rounded-2xl p-4 ${pagoCompleto ? 'bg-[#F1F8F3] text-[#557260]' : 'bg-[#FFF2F6] text-[#D93470]'}`}><p className="font-bold">{pagoCompleto ? 'Pagado' : pago.estado}</p><p className="mt-1 text-sm">{pagoCompleto ? 'No hay saldo pendiente.' : `Falta cobrar $${pago.saldo.toFixed(2)}`}</p></div>
-            <dl className="mt-4 space-y-3 text-sm"><FilaPago etiqueta="Precio total" valor={pago.total}/><FilaPago etiqueta="Abono" valor={pago.abono}/><FilaPago etiqueta="Saldo" valor={pago.saldo} fuerte/></dl>
+            <dl className="mt-4 space-y-3 text-sm"><FilaPago etiqueta="Precio total" valor={pago.total}/><FilaPago etiqueta="Total pagado" valor={pago.abono}/><FilaPago etiqueta="Saldo" valor={pago.saldo} fuerte/></dl>
+
+            {mostrarFormularioPago && !pedidoEntregado && !pedidoCancelado && (
+              <div className="mt-5 rounded-2xl border border-[#EEDDE3] bg-[#FFFDFC] p-4">
+                <div className="flex items-center justify-between gap-3"><div><p className="font-bold text-[#5C3A4D]">Registrar movimiento</p><p className="mt-0.5 text-xs text-[#9A8B93]">El saldo se recalculará automáticamente.</p></div><button type="button" onClick={() => setMostrarFormularioPago(false)} className="flex h-9 w-9 items-center justify-center rounded-full text-[#9A8B93] hover:bg-[#F6E6EB]"><X size={18}/></button></div>
+                <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                  <label><span className="mb-1.5 block text-xs font-semibold text-[#756870]">Monto</span><input type="number" min="0.01" max={pago.saldo} step="0.01" value={montoPago} onChange={(e) => setMontoPago(e.target.value)} className="min-h-11 w-full rounded-xl border border-[#E5D7DE] bg-white px-3 text-[#5C3A4D] outline-none focus:border-[#EC3D7F]" placeholder="0.00" /></label>
+                  <label><span className="mb-1.5 block text-xs font-semibold text-[#756870]">Fecha</span><input type="date" value={fechaPago} onChange={(e) => setFechaPago(e.target.value)} className="min-h-11 w-full rounded-xl border border-[#E5D7DE] bg-white px-3 text-[#5C3A4D] outline-none focus:border-[#EC3D7F]" /></label>
+                  <label><span className="mb-1.5 block text-xs font-semibold text-[#756870]">Método</span><select value={metodoPago} onChange={(e) => setMetodoPago(e.target.value as MetodoPago)} className="min-h-11 w-full rounded-xl border border-[#E5D7DE] bg-white px-3 text-[#5C3A4D] outline-none focus:border-[#EC3D7F]">{METODOS_PAGO.map((metodo) => <option key={metodo} value={metodo}>{metodo}</option>)}</select></label>
+                  <label><span className="mb-1.5 block text-xs font-semibold text-[#756870]">Nota opcional</span><input value={notaPago} onChange={(e) => setNotaPago(e.target.value)} className="min-h-11 w-full rounded-xl border border-[#E5D7DE] bg-white px-3 text-[#5C3A4D] outline-none focus:border-[#EC3D7F]" placeholder="Ej. Segundo abono" /></label>
+                </div>
+                <button type="button" disabled={guardandoPago} onClick={guardarPago} className="mt-4 inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-xl bg-[#EC3D7F] px-4 text-sm font-bold text-white hover:bg-[#D93470] disabled:opacity-60"><WalletCards size={17}/>{guardandoPago ? 'Guardando pago...' : 'Guardar pago'}</button>
+              </div>
+            )}
+
+            <div className="mt-5 border-t border-[#F0E4E8] pt-4">
+              <div className="flex items-center gap-2"><History size={17} className="text-[#9A7185]"/><p className="text-sm font-bold text-[#5C3A4D]">Historial de pagos</p></div>
+              {pagos.length === 0 ? (
+                <p className="mt-3 rounded-xl bg-[#FFF9F7] px-3 py-3 text-sm text-[#9A8B93]">Aún no hay movimientos registrados.</p>
+              ) : (
+                <div className="mt-3 space-y-2.5">
+                  {pagos.map((movimiento) => (
+                    <MovimientoPago
+                      key={movimiento.id}
+                      pago={movimiento}
+                      anulando={anulandoPagoId === movimiento.id}
+                      puedeAnular={!pedidoEntregado}
+                      onAnular={() => anularPago(movimiento)}
+                    />
+                  ))}
+                </div>
+              )}
+            </div>
           </section>
 
           <section className="rounded-2xl border border-[#EEDDE3] bg-white p-4 sm:p-6">
@@ -258,19 +413,38 @@ function DetallePedido({ idPedido, onVolver, onEditar }: DetallePedidoProps) {
           </section>
 
           <section className="rounded-2xl border border-[#E3D7DD] bg-gradient-to-b from-white to-[#FFF9FB] p-4 shadow-sm sm:p-6">
-            <div className="flex items-start gap-3"><div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#FCE5ED] text-[#D93470]"><PackageCheck size={20}/></div><div><h3 className="text-base font-bold text-[#5C3A4D] sm:text-lg">Entrega al cliente</h3><p className="mt-1 text-xs leading-5 text-[#756870] sm:text-sm">Confirma el pago pendiente y después registra que el cliente retiró el pedido.</p></div></div>
+            <div className="flex items-start gap-3"><div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#FCE5ED] text-[#D93470]"><PackageCheck size={20}/></div><div><h3 className="text-base font-bold text-[#5C3A4D] sm:text-lg">Entrega al cliente</h3><p className="mt-1 text-xs leading-5 text-[#756870] sm:text-sm">Registra el saldo pendiente y después confirma que el cliente retiró el pedido.</p></div></div>
             <div className="mt-5 space-y-3">
               <div className={`rounded-2xl border p-4 ${pagoCompleto ? 'border-[#D6E5D8] bg-[#F4F9F5]' : 'border-[#F3D2DE] bg-[#FFF5F8]'}`}>
-                <div className="flex items-start gap-3"><div className={`mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-bold ${pagoCompleto ? 'bg-[#DCEADF] text-[#557260]' : 'bg-[#FCE5ED] text-[#D93470]'}`}>{pagoCompleto ? <CheckCircle2 size={16}/> : '1'}</div><div className="min-w-0 flex-1"><p className={`font-bold ${pagoCompleto ? 'text-[#557260]' : 'text-[#5C3A4D]'}`}>{pagoCompleto ? 'Pago confirmado' : 'Cobrar saldo pendiente'}</p><p className="mt-1 text-sm text-[#756870]">{pagoCompleto ? 'El pedido no tiene saldo por cobrar.' : `El cliente debe $${pago.saldo.toFixed(2)}.`}</p>{!pagoCompleto && !pedidoCancelado && !pedidoEntregado && <button type="button" disabled={guardandoPago} onClick={marcarComoPagado} className="mt-3 inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-[#EC3D7F] px-4 text-sm font-bold text-white hover:bg-[#D93470] disabled:opacity-60 sm:w-auto"><WalletCards size={17}/>{guardandoPago ? 'Registrando pago...' : `Marcar como pagado · $${pago.saldo.toFixed(2)}`}</button>}</div></div>
+                <div className="flex items-start gap-3"><div className={`mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-bold ${pagoCompleto ? 'bg-[#DCEADF] text-[#557260]' : 'bg-[#FCE5ED] text-[#D93470]'}`}>{pagoCompleto ? <CheckCircle2 size={16}/> : '1'}</div><div className="min-w-0 flex-1"><p className={`font-bold ${pagoCompleto ? 'text-[#557260]' : 'text-[#5C3A4D]'}`}>{pagoCompleto ? 'Pago confirmado' : 'Cobrar saldo pendiente'}</p><p className="mt-1 text-sm text-[#756870]">{pagoCompleto ? 'El pedido no tiene saldo por cobrar.' : `El cliente debe $${pago.saldo.toFixed(2)}.`}</p>{!pagoCompleto && !pedidoCancelado && !pedidoEntregado && <button type="button" onClick={() => abrirFormularioPago(pago.saldo)} className="mt-3 inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-[#EC3D7F] px-4 text-sm font-bold text-white hover:bg-[#D93470] sm:w-auto"><WalletCards size={17}/>Registrar pago final · ${pago.saldo.toFixed(2)}</button>}</div></div>
               </div>
               <div className={`rounded-2xl border p-4 ${pedidoEntregado ? 'border-[#D6E5D8] bg-[#F4F9F5]' : 'border-[#E5D7DE] bg-white'}`}>
-                <div className="flex items-start gap-3"><div className={`mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-bold ${pedidoEntregado ? 'bg-[#DCEADF] text-[#557260]' : 'bg-[#F3EAF0] text-[#6F4C69]'}`}>{pedidoEntregado ? <CheckCircle2 size={16}/> : '2'}</div><div className="min-w-0 flex-1"><p className={`font-bold ${pedidoEntregado ? 'text-[#557260]' : 'text-[#5C3A4D]'}`}>{pedidoEntregado ? 'Pedido entregado' : 'Confirmar retiro'}</p><p className="mt-1 text-sm text-[#756870]">{pedidoEntregado ? 'El cliente ya retiró este pedido.' : !pagoCompleto ? 'Primero confirma el pago.' : !pedidoListo ? 'Primero marca el pedido como Listo.' : 'El pago está completo. Ya puedes confirmar el retiro.'}</p>{!pedidoEntregado && !pedidoCancelado && <button type="button" disabled={guardandoEstado || !puedeEntregar} onClick={marcarComoEntregado} className="mt-3 inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-[#6F4C69] px-4 text-sm font-bold text-white hover:bg-[#5D3F58] disabled:cursor-not-allowed disabled:opacity-40 sm:w-auto"><PackageCheck size={17}/>{guardandoEstado ? 'Guardando...' : 'Marcar como entregado'}</button>}</div></div>
+                <div className="flex items-start gap-3"><div className={`mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-bold ${pedidoEntregado ? 'bg-[#DCEADF] text-[#557260]' : 'bg-[#F3EAF0] text-[#6F4C69]'}`}>{pedidoEntregado ? <CheckCircle2 size={16}/> : '2'}</div><div className="min-w-0 flex-1"><p className={`font-bold ${pedidoEntregado ? 'text-[#557260]' : 'text-[#5C3A4D]'}`}>{pedidoEntregado ? 'Pedido entregado' : 'Confirmar retiro'}</p><p className="mt-1 text-sm text-[#756870]">{pedidoEntregado ? 'El cliente ya retiró este pedido.' : !pagoCompleto ? 'Primero registra el saldo pendiente.' : !pedidoListo ? 'Primero marca el pedido como Listo.' : 'El pago está completo. Ya puedes confirmar el retiro.'}</p>{!pedidoEntregado && !pedidoCancelado && <button type="button" disabled={guardandoEstado || !puedeEntregar} onClick={marcarComoEntregado} className="mt-3 inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-[#6F4C69] px-4 text-sm font-bold text-white hover:bg-[#5D3F58] disabled:cursor-not-allowed disabled:opacity-40 sm:w-auto"><PackageCheck size={17}/>{guardandoEstado ? 'Guardando...' : 'Marcar como entregado'}</button>}</div></div>
               </div>
             </div>
           </section>
         </div>
       </div>
     </main>
+  )
+}
+
+function MovimientoPago({ pago, anulando, puedeAnular, onAnular }: { pago: PagoEncargo; anulando: boolean; puedeAnular: boolean; onAnular: () => void }) {
+  const fecha = fechaISOADate(pago.fecha_pago).toLocaleDateString('es-SV', { day: '2-digit', month: 'short', year: 'numeric' })
+  const monto = Number(pago.monto ?? 0)
+
+  return (
+    <div className={`rounded-xl border p-3 ${pago.anulado ? 'border-[#E4E0E2] bg-[#F8F7F7] opacity-75' : 'border-[#EEDDE3] bg-[#FFFDFC]'}`}>
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2"><p className={`font-bold ${pago.anulado ? 'text-[#8F858A] line-through' : 'text-[#5C3A4D]'}`}>${monto.toFixed(2)}</p>{pago.anulado && <span className="rounded-full bg-[#ECE8EA] px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-[#756870]">Anulado</span>}</div>
+          <p className="mt-1 text-xs text-[#756870]">{fecha} · {pago.metodo_pago || 'No especificado'}</p>
+          {pago.nota && <p className="mt-1.5 text-xs leading-5 text-[#8D7A84]">{pago.nota}</p>}
+          {pago.anulado && pago.motivo_anulacion && <p className="mt-1 text-xs text-[#9A8B93]">Motivo: {pago.motivo_anulacion}</p>}
+        </div>
+        {!pago.anulado && puedeAnular && <button type="button" disabled={anulando} onClick={onAnular} className="inline-flex min-h-9 shrink-0 items-center gap-1 rounded-lg border border-[#E4D7DC] px-2.5 text-xs font-semibold text-[#8A6877] hover:bg-[#FFF1F5] disabled:opacity-50"><Ban size={13}/>{anulando ? 'Anulando...' : 'Anular'}</button>}
+      </div>
+    </div>
   )
 }
 

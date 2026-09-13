@@ -57,11 +57,10 @@ function EditarPedido({ idPedido, onVolver, onGuardado }: EditarPedidoProps) {
   const [dedicatoria, setDedicatoria] = useState('')
   const [observaciones, setObservaciones] = useState('')
   const [precioCotizado, setPrecioCotizado] = useState('')
-  const [abono, setAbono] = useState('')
 
   const precio = Number(precioCotizado || 0)
-  const abonoNumero = Number(abono || 0)
-  const saldo = Math.max(precio - abonoNumero, 0)
+  const totalPagado = Number(pedido?.abono ?? 0)
+  const saldo = Math.max(precio - totalPagado, 0)
   const existentesActivas = useMemo(
     () => imagenesExistentes.filter((imagen) => !imagen.eliminar),
     [imagenesExistentes],
@@ -102,7 +101,6 @@ function EditarPedido({ idPedido, onVolver, onGuardado }: EditarPedidoProps) {
       setDedicatoria(encargo.dedicatoria ?? '')
       setObservaciones(encargo.observaciones ?? '')
       setPrecioCotizado(String(encargo.precio_cotizado ?? ''))
-      setAbono(String(encargo.abono ?? ''))
 
       const registros = await cargarImagenesEncargo(encargo.id, encargo.imagen_referencia)
       const urls = await obtenerUrlsImagenes(registros.map((imagen) => imagen.ruta_storage))
@@ -134,8 +132,7 @@ function EditarPedido({ idPedido, onVolver, onGuardado }: EditarPedidoProps) {
     if (!saborRelleno) return 'Selecciona el sabor del relleno.'
     if (!chantilly) return 'Selecciona el chantilly.'
     if (precio <= 0) return 'El precio cotizado debe ser mayor que $0.'
-    if (abonoNumero < 0) return 'El abono no puede ser negativo.'
-    if (abonoNumero > precio) return 'El abono no puede ser mayor que el precio cotizado.'
+    if (precio + 0.005 < totalPagado) return `El precio no puede ser menor que los $${totalPagado.toFixed(2)} ya pagados.`
     if (existentesActivas.length + imagenesNuevas.length > MAX_IMAGENES_POR_ENCARGO) {
       return `Puedes conservar como máximo ${MAX_IMAGENES_POR_ENCARGO} imágenes por pedido.`
     }
@@ -172,7 +169,6 @@ function EditarPedido({ idPedido, onVolver, onGuardado }: EditarPedidoProps) {
           dedicatoria: dedicatoria.trim() || null,
           observaciones: observaciones.trim() || null,
           precio_cotizado: precio,
-          abono: abonoNumero,
         })
         .eq('id', pedido.id)
 
@@ -284,11 +280,11 @@ function EditarPedido({ idPedido, onVolver, onGuardado }: EditarPedidoProps) {
         </section>
 
         <section className="rounded-2xl border border-[#EEDDE3] bg-white p-4 sm:p-6">
-          <h3 className="text-lg font-semibold text-[#5C3A4D]">Precio y abono actual</h3>
-          <p className="mt-1 text-xs text-[#9A8B93]">El historial detallado de pagos será el siguiente módulo. Por ahora puedes corregir el valor acumulado actual.</p>
+          <h3 className="text-lg font-semibold text-[#5C3A4D]">Precio y pagos</h3>
+          <p className="mt-1 text-xs text-[#9A8B93]">Los pagos ya no se editan como un número acumulado. Registra o anula movimientos desde el detalle del pedido para conservar el historial.</p>
           <div className="mt-5 grid gap-5 sm:grid-cols-3">
-            <label><span className="mb-2 block text-sm font-medium">Precio cotizado</span><input type="number" min="0" step="0.01" value={precioCotizado} onChange={(e) => setPrecioCotizado(e.target.value)} className="input-sc pl-4" /></label>
-            <label><span className="mb-2 block text-sm font-medium">Abono registrado</span><input type="number" min="0" max={precio || undefined} step="0.01" value={abono} onChange={(e) => setAbono(e.target.value)} className="input-sc pl-4" /></label>
+            <label><span className="mb-2 block text-sm font-medium">Precio cotizado</span><input type="number" min={totalPagado || 0} step="0.01" value={precioCotizado} onChange={(e) => setPrecioCotizado(e.target.value)} className="input-sc pl-4" /></label>
+            <div><span className="mb-2 block text-sm font-medium">Total pagado</span><div className="min-h-12 rounded-xl border border-[#E5D7DE] bg-[#FFFDFC] px-4 py-3 font-bold text-[#5C3A4D]">${totalPagado.toFixed(2)}</div></div>
             <div><span className="mb-2 block text-sm font-medium">Saldo</span><div className="min-h-12 rounded-xl border border-[#DCE4D8] bg-[#F8FAF6] px-4 py-3 font-bold text-[#64745D]">${saldo.toFixed(2)}</div></div>
           </div>
         </section>
