@@ -26,6 +26,8 @@ export type Encargo = {
   estado_pedido: EstadoPedido | string
   creado_por?: string | null
   created_at?: string | null
+  editado_por?: string | null
+  editado_at?: string | null
 }
 
 export const obtenerPago = (pedido: Pick<Encargo, 'precio_cotizado' | 'abono'>) => {

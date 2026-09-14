@@ -15,14 +15,16 @@ import {
   Phone,
   Plus,
   Printer,
+  Trash2,
   WalletCards,
   X,
 } from 'lucide-react'
 
 import sweetCakesLogo from '../assets/sweet-cakes-logo.jpeg'
 import { cargarImagenesEncargo } from '../lib/encargoImagenes'
-import { obtenerUrlsImagenes } from '../lib/imagenes'
+import { eliminarImagenesReferencia, obtenerUrlsImagenes } from '../lib/imagenes'
 import { imprimirHojaEncargo } from '../lib/imprimirHojaEncargo'
+import { puedeAjustarPrecio, puedeAnularPago, puedeCancelarPedido, puedeEditarPedido, puedeEliminarPedido } from '../lib/permisos'
 import {
   anularPagoEncargo,
   cargarPagosEncargo,
@@ -36,6 +38,7 @@ import { fechaISOADate, fechaLocalAISO, formatearHora, obtenerPago } from '../ty
 
 type DetallePedidoProps = {
   idPedido: string | number
+  rol: string
   onVolver: () => void
   onEditar: () => void
 }
@@ -44,7 +47,7 @@ type ImagenVista = { id: string; ruta: string; url: string }
 
 const METODOS_PAGO: MetodoPago[] = ['Efectivo', 'Transferencia', 'Otro']
 
-function DetallePedido({ idPedido, onVolver, onEditar }: DetallePedidoProps) {
+function DetallePedido({ idPedido, rol, onVolver, onEditar }: DetallePedidoProps) {
   const [pedido, setPedido] = useState<Encargo | null>(null)
   const [imagenes, setImagenes] = useState<ImagenVista[]>([])
   const [pagos, setPagos] = useState<PagoEncargo[]>([])
@@ -61,8 +64,16 @@ function DetallePedido({ idPedido, onVolver, onEditar }: DetallePedidoProps) {
   const [mostrarAjustePrecio, setMostrarAjustePrecio] = useState(false)
   const [nuevoPrecio, setNuevoPrecio] = useState('')
   const [guardandoPrecio, setGuardandoPrecio] = useState(false)
+  const [eliminandoPedido, setEliminandoPedido] = useState(false)
+  const [autores, setAutores] = useState<Record<string, string>>({})
   const [error, setError] = useState('')
   const [aviso, setAviso] = useState('')
+
+  const puedeEditarDatos = puedeEditarPedido(rol)
+  const puedeCambiarPrecio = puedeAjustarPrecio(rol)
+  const puedeCancelar = puedeCancelarPedido(rol)
+  const puedeAnularMovimientos = puedeAnularPago(rol)
+  const puedeEliminar = puedeEliminarPedido(rol)
 
   useEffect(() => {
     let activo = true
@@ -74,7 +85,7 @@ function DetallePedido({ idPedido, onVolver, onEditar }: DetallePedidoProps) {
 
       const { data, error: errorSupabase } = await supabase
         .from('encargos')
-        .select('id,nombre_cliente,telefono,fecha_entrega,hora_entrega,sabor_torta,sabor_relleno,chantilly,imagen_referencia,dedicatoria,observaciones,precio_cotizado,abono,estado_pedido,creado_por,created_at')
+        .select('id,nombre_cliente,telefono,fecha_entrega,hora_entrega,sabor_torta,sabor_relleno,chantilly,imagen_referencia,dedicatoria,observaciones,precio_cotizado,abono,estado_pedido,creado_por,created_at,editado_por,editado_at')
         .eq('id', idPedido)
         .single()
 
@@ -96,6 +107,26 @@ function DetallePedido({ idPedido, onVolver, onEditar }: DetallePedidoProps) {
           cargarImagenesEncargo(encargo.id, encargo.imagen_referencia),
           cargarPagosEncargo(encargo.id),
         ])
+        const idsAutores = Array.from(new Set(
+          [encargo.creado_por, encargo.editado_por].filter((id): id is string => Boolean(id)),
+        ))
+        const mapaAutores: Record<string, string> = {}
+
+        if (idsAutores.length > 0) {
+          const { data: perfilesAutores, error: errorAutores } = await supabase
+            .from('perfiles')
+            .select('id,nombre')
+            .in('id', idsAutores)
+
+          if (errorAutores) {
+            console.warn('No se pudieron cargar los nombres del registro del pedido:', errorAutores)
+          } else {
+            for (const perfil of perfilesAutores ?? []) {
+              mapaAutores[String(perfil.id)] = String(perfil.nombre || 'Usuario')
+            }
+          }
+        }
+
         const urls = await obtenerUrlsImagenes(registros.map((imagen) => imagen.ruta_storage))
         const mapaUrls = new Map(urls.map((item) => [item.ruta, item.url]))
         const vistas = registros
@@ -105,6 +136,7 @@ function DetallePedido({ idPedido, onVolver, onEditar }: DetallePedidoProps) {
         if (activo) {
           setImagenes(vistas)
           setPagos(historialPagos)
+          setAutores(mapaAutores)
           setIndiceImagen(0)
         }
       } catch (errorCarga) {
@@ -124,7 +156,7 @@ function DetallePedido({ idPedido, onVolver, onEditar }: DetallePedidoProps) {
       cargarPagosEncargo(idPedido),
       supabase
         .from('encargos')
-        .select('abono,precio_cotizado')
+        .select('abono,precio_cotizado,editado_por,editado_at')
         .eq('id', idPedido)
         .single(),
     ])
@@ -136,11 +168,30 @@ function DetallePedido({ idPedido, onVolver, onEditar }: DetallePedidoProps) {
       ...actual,
       abono: respuestaPedido.data.abono,
       precio_cotizado: respuestaPedido.data.precio_cotizado,
+      editado_por: respuestaPedido.data.editado_por,
+      editado_at: respuestaPedido.data.editado_at,
     } : actual)
+
+    const editorId = respuestaPedido.data.editado_por as string | null
+    if (editorId && !autores[editorId]) {
+      const { data: perfilEditor } = await supabase
+        .from('perfiles')
+        .select('id,nombre')
+        .eq('id', editorId)
+        .maybeSingle()
+
+      if (perfilEditor) {
+        setAutores((actuales) => ({ ...actuales, [editorId]: String(perfilEditor.nombre || 'Usuario') }))
+      }
+    }
   }
 
   const cambiarEstado = async (nuevoEstado: EstadoPedido) => {
     if (!pedido || pedido.estado_pedido === nuevoEstado) return
+    if (nuevoEstado === 'Cancelado' && !puedeCancelar) {
+      setError('Tu rol no puede cancelar pedidos.')
+      return
+    }
 
     setGuardandoEstado(true)
     setError('')
@@ -252,7 +303,7 @@ function DetallePedido({ idPedido, onVolver, onEditar }: DetallePedidoProps) {
   }
 
   const abrirAjustePrecio = () => {
-    if (!pedido) return
+    if (!pedido || !puedeCambiarPrecio) return
     setError('')
     setAviso('')
     setNuevoPrecio(Number(pedido.precio_cotizado ?? 0).toFixed(2))
@@ -260,7 +311,7 @@ function DetallePedido({ idPedido, onVolver, onEditar }: DetallePedidoProps) {
   }
 
   const guardarAjustePrecio = async () => {
-    if (!pedido) return
+    if (!pedido || !puedeCambiarPrecio) return
 
     const precio = Number(nuevoPrecio.replace(',', '.'))
     const totalPagado = obtenerPago(pedido).abono
@@ -299,6 +350,10 @@ function DetallePedido({ idPedido, onVolver, onEditar }: DetallePedidoProps) {
 
   const anularPago = async (pagoMovimiento: PagoEncargo) => {
     if (!pedido || pagoMovimiento.anulado) return
+    if (!puedeAnularMovimientos) {
+      setError('Tu rol no puede anular movimientos de pago.')
+      return
+    }
 
     if (pedido.estado_pedido === 'Entregado') {
       setError('No se puede anular un pago desde aquí porque el pedido ya fue entregado.')
@@ -342,6 +397,46 @@ function DetallePedido({ idPedido, onVolver, onEditar }: DetallePedidoProps) {
     } catch (errorImpresion) {
       console.error(errorImpresion)
       setError(errorImpresion instanceof Error ? errorImpresion.message : 'No se pudo preparar la hoja de encargo.')
+    }
+  }
+
+  const eliminarPedidoActual = async () => {
+    if (!pedido || !puedeEliminar) return
+
+    const confirmado = window.confirm(
+      `¿Eliminar definitivamente el pedido de ${pedido.nombre_cliente}?\n\nSe borrarán también sus pagos registrados y referencias asociadas. Esta acción no se puede deshacer.`,
+    )
+    if (!confirmado) return
+
+    setEliminandoPedido(true)
+    setError('')
+    setAviso('')
+
+    const rutas = Array.from(new Set(
+      [pedido.imagen_referencia, ...imagenes.map((imagen) => imagen.ruta)]
+        .filter((ruta): ruta is string => Boolean(ruta)),
+    ))
+
+    try {
+      const { error: errorEliminar } = await supabase
+        .from('encargos')
+        .delete()
+        .eq('id', pedido.id)
+
+      if (errorEliminar) throw errorEliminar
+
+      if (rutas.length > 0) {
+        await eliminarImagenesReferencia(rutas).catch((errorImagenes) => {
+          console.warn('El pedido fue eliminado, pero no se pudieron limpiar todas las imágenes de Storage:', errorImagenes)
+        })
+      }
+
+      onVolver()
+    } catch (errorEliminar) {
+      console.error(errorEliminar)
+      setError(errorEliminar instanceof Error ? errorEliminar.message : 'No se pudo eliminar el pedido.')
+    } finally {
+      setEliminandoPedido(false)
     }
   }
 
@@ -394,8 +489,9 @@ function DetallePedido({ idPedido, onVolver, onEditar }: DetallePedidoProps) {
       <header className="mb-6 sm:mb-7">
         <div className="mb-4 flex flex-wrap gap-2">
           <button type="button" onClick={onVolver} className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-[#E5D7DE] bg-white px-4 text-sm font-semibold text-[#5C3A4D] hover:bg-[#FBF1F4]"><ArrowLeft size={17}/> Volver</button>
-          <button type="button" onClick={onEditar} className="inline-flex min-h-11 items-center gap-2 rounded-xl bg-[#EC3D7F] px-4 text-sm font-semibold text-white hover:bg-[#D93470]"><Pencil size={17}/> Editar pedido</button>
+          {puedeEditarDatos && <button type="button" onClick={onEditar} className="inline-flex min-h-11 items-center gap-2 rounded-xl bg-[#EC3D7F] px-4 text-sm font-semibold text-white hover:bg-[#D93470]"><Pencil size={17}/> Editar pedido</button>}
           <button type="button" onClick={imprimirEncargo} className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-[#D9C6CF] bg-white px-4 text-sm font-semibold text-[#5C3A4D] hover:bg-[#FBF1F4]"><Printer size={17}/> Imprimir hoja</button>
+          {puedeEliminar && <button type="button" disabled={eliminandoPedido} onClick={eliminarPedidoActual} className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-[#E5B8C7] bg-white px-4 text-sm font-semibold text-[#B32E5D] hover:bg-[#FFF1F5] disabled:opacity-50"><Trash2 size={17}/>{eliminandoPedido ? 'Eliminando...' : 'Eliminar pedido'}</button>}
         </div>
 
         <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#B07A91] sm:text-sm sm:normal-case sm:tracking-normal sm:text-[#756870]">Detalle del pedido</p>
@@ -419,6 +515,14 @@ function DetallePedido({ idPedido, onVolver, onEditar }: DetallePedidoProps) {
               <Dato etiqueta="Estado" valor={pedido.estado_pedido} />
             </div>
             {pedido.telefono && <a href={`tel:${pedido.telefono}`} className="mt-4 flex min-h-11 w-full items-center justify-center gap-2 rounded-xl border border-[#E5D7DE] bg-[#FFFDFC] text-sm font-semibold text-[#5C3A4D] sm:hidden"><Phone size={17}/> Llamar al cliente</a>}
+
+            <div className="mt-4 border-t border-[#F0E4E8] pt-4">
+              <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-[#A18C96]"><History size={14}/> Registro del pedido</div>
+              <div className="mt-2 space-y-1.5 text-xs leading-5 text-[#756870]">
+                <p><span className="font-semibold text-[#5C3A4D]">Creado por:</span> {pedido.creado_por ? (autores[pedido.creado_por] ?? 'Usuario') : 'Registro anterior'}{pedido.created_at ? ` · ${formatearFechaHoraRegistro(pedido.created_at)}` : ''}</p>
+                {pedido.editado_at && <p><span className="font-semibold text-[#5C3A4D]">Última edición por:</span> {pedido.editado_por ? (autores[pedido.editado_por] ?? 'Usuario') : 'Usuario'} · {formatearFechaHoraRegistro(pedido.editado_at)}</p>}
+              </div>
+            </div>
           </section>
 
           <section className="rounded-2xl border border-[#EEDDE3] bg-white p-4 sm:p-6">
@@ -460,7 +564,7 @@ function DetallePedido({ idPedido, onVolver, onEditar }: DetallePedidoProps) {
             <h3 className="text-base font-bold text-[#5C3A4D] sm:text-lg">Estado de preparación</h3>
             <p className="mt-1 text-xs text-[#756870] sm:text-sm">Primero prepara el pedido. La entrega final se registra abajo.</p>
             <div className="mt-4 grid grid-cols-2 gap-2 xl:grid-cols-1">
-              {(['Pendiente','Listo','Cancelado'] as EstadoPedido[]).map((estado) => (
+              {((puedeCancelar ? ['Pendiente','Listo','Cancelado'] : ['Pendiente','Listo']) as EstadoPedido[]).map((estado) => (
                 <button key={estado} type="button" disabled={guardandoEstado || pedidoEntregado} onClick={() => cambiarEstado(estado)} className={`min-h-12 rounded-xl border px-3 text-left text-sm font-semibold transition disabled:opacity-50 ${pedido.estado_pedido === estado ? estado === 'Pendiente' ? 'border-[#EC3D7F] bg-[#FCE5ED] text-[#D93470]' : estado === 'Listo' ? 'border-[#BFA7B9] bg-[#F3EAF0] text-[#6F4C69]' : 'border-[#D8D8D8] bg-[#F3F3F3] text-[#666]' : 'border-[#E5D7DE] bg-white text-[#756870] hover:bg-[#FBF1F4]'}`}>{pedido.estado_pedido === estado && <CheckCircle2 size={16} className="mr-2 inline"/>}{estado}</button>
               ))}
             </div>
@@ -479,7 +583,7 @@ function DetallePedido({ idPedido, onVolver, onEditar }: DetallePedidoProps) {
             <div className={`mt-4 rounded-2xl p-4 ${pagoCompleto ? 'bg-[#F1F8F3] text-[#557260]' : 'bg-[#FFF2F6] text-[#D93470]'}`}><p className="font-bold">{pagoCompleto ? 'Pagado' : pago.estado}</p><p className="mt-1 text-sm">{pagoCompleto ? 'No hay saldo pendiente.' : `Falta cobrar $${pago.saldo.toFixed(2)}`}</p></div>
             <dl className="mt-4 space-y-3 text-sm"><FilaPago etiqueta="Precio actual" valor={pago.total}/><FilaPago etiqueta="Total pagado" valor={pago.abono}/><FilaPago etiqueta="Saldo" valor={pago.saldo} fuerte/></dl>
 
-            {!pedidoEntregado && !pedidoCancelado && (
+            {puedeCambiarPrecio && !pedidoEntregado && !pedidoCancelado && (
               <div className="mt-4 border-t border-[#F0E4E8] pt-4">
                 {!mostrarAjustePrecio ? (
                   <button type="button" onClick={abrirAjustePrecio} className="inline-flex min-h-10 items-center gap-2 rounded-xl border border-[#E5D7DE] bg-white px-3 text-xs font-bold text-[#5C3A4D] hover:bg-[#FBF1F4]"><Pencil size={14}/> Ajustar precio del pedido</button>
@@ -520,7 +624,7 @@ function DetallePedido({ idPedido, onVolver, onEditar }: DetallePedidoProps) {
                       key={movimiento.id}
                       pago={movimiento}
                       anulando={anulandoPagoId === movimiento.id}
-                      puedeAnular={!pedidoEntregado}
+                      puedeAnular={puedeAnularMovimientos && !pedidoEntregado}
                       onAnular={() => anularPago(movimiento)}
                     />
                   ))}
@@ -563,6 +667,19 @@ function MovimientoPago({ pago, anulando, puedeAnular, onAnular }: { pago: PagoE
       </div>
     </div>
   )
+}
+
+function formatearFechaHoraRegistro(valor: string) {
+  const fecha = new Date(valor)
+  if (Number.isNaN(fecha.getTime())) return valor
+
+  return fecha.toLocaleString('es-SV', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  })
 }
 
 function Dato({ icono, etiqueta, valor }: { icono?: ReactNode; etiqueta: string; valor: string }) {
